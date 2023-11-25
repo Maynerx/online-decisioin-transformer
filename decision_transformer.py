@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import transformers
 from transformers import GPT2Model
-
+from Custom_env import Env
+from replay_buffer import Custom_Buffer
 
 class TrajectoryModel(nn.Module):
 
@@ -46,6 +47,7 @@ class DecisionTransformer(TrajectoryModel):
             n_embd=hidden_size,
             **kwargs
         )
+        self.buffer = Custom_Buffer()
 
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
@@ -153,15 +155,38 @@ class DecisionTransformer(TrajectoryModel):
 
         return action_preds[0,-1]
     
-    def learn(self, env):
-        pass
+    def learn(self, env_id, max_epsiode, max_ep_len):
+        env = Env(env_id)
+        state = env.reset()
+        state, action, timestep ,rtg = env.states, env.action, env.timesteps, env.rtg 
+        for _ in range(max_epsiode):
+            action_dist = self.get_action(
+            states=state,
+            actions=action,
+            rewards=None,
+            returns_to_go=rtg,
+            timesteps=timestep
+            )
+            state, action, reward, rtg, timestep, done = env.step(action_dist, _)
+            if done:
+                state = env.reset()
+                state, action, timestep ,rtg = env.states, env.action, env.timesteps, env.rtg
+            self.buffer.push(state, action, reward, done, rtg, timestep)
+            
+                
+
 
 
 import gym
 
-env = gym.make('CartPole-medium-v0')
+env = gym.make('CartPole-v0')
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.n
 
-env.get_dataset()
+env.close()
+
+model = DecisionTransformer(state_dim, action_dim, 128)
+model.learn('CartPole-v2', max_epsiode=5, max_ep_len=None)
 
 
 
