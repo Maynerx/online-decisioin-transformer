@@ -13,7 +13,7 @@ class Custom_Buffer:
         pass
 
     def push(self, states, actions, rewards, dones, rtg, timesteps, ordering, padding_mask):
-        pass
+        self
 
 class ReplayBuffer(object):
     def __init__(self, capacity, trajectories=[]):
