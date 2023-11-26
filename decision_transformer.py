@@ -9,6 +9,7 @@ from replay_buffer import Custom_Buffer
 import numpy as np
 import matplotlib.pyplot as plt
 import tqdm
+from tqdm import tqdm_notebook
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -203,12 +204,13 @@ class DecisionTransformer(TrajectoryModel):
 
             
     
-    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50):
+    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False):
         env = Env(env_id)
         i = 0
         r, l, r_ = [], [], []
         losses = []
-        for episode in tqdm.tqdm(range(max_epsiode)):
+        f = tqdm.tqdm if not notebook else tqdm_notebook
+        for episode in f(range(max_epsiode)):
             state, action, rtg, timestep = env.reset()
             rewards = []
             for _ in range(max_ep_len):
