@@ -5,6 +5,11 @@ import transformers
 from transformers import GPT2Model
 from Custom_env import Env
 from replay_buffer import Custom_Buffer
+import numpy as np
+import matplotlib.pyplot as plt
+import tqdm
+
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class TrajectoryModel(nn.Module):
 
@@ -22,6 +27,14 @@ class TrajectoryModel(nn.Module):
     def get_action(self, states, actions, rewards, **kwargs):
         # these will come as tensors on the correct device
         return torch.zeros_like(actions[-1])
+    
+
+def mean_square_loss(pred, target):
+    return torch.mean((pred-target)**2)
+
+loss_fn_list = {
+    'mse' : mean_square_loss
+}
 
 class DecisionTransformer(TrajectoryModel):
 
@@ -34,46 +47,53 @@ class DecisionTransformer(TrajectoryModel):
             state_dim,
             act_dim,
             hidden_size,
+            loss_fn = 'mse',
+            lr = 1e-3,
+            batch_size = 64,
+            mem_capacity = 4096,
             max_length=None,
             max_ep_len=4096,
             action_tanh=True,
             **kwargs
     ):
         super().__init__(state_dim, act_dim, max_length=max_length)
-
+        self.to(DEVICE)
         self.hidden_size = hidden_size
         config = transformers.GPT2Config(
             vocab_size=1,  # doesn't matter -- we don't use the vocab
             n_embd=hidden_size,
             **kwargs
         )
-        self.buffer = Custom_Buffer()
+        self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)
 
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
-        self.transformer = GPT2Model(config)
+        self.transformer = GPT2Model(config).to(DEVICE)
 
-        self.embed_timestep = nn.Embedding(max_ep_len, hidden_size)
-        self.embed_return = torch.nn.Linear(1, hidden_size)
-        self.embed_state = torch.nn.Linear(self.state_dim, hidden_size)
-        self.embed_action = torch.nn.Linear(self.act_dim, hidden_size)
+        self.embed_timestep = nn.Embedding(max_ep_len, hidden_size).to(DEVICE)
+        self.embed_return = torch.nn.Linear(1, hidden_size).to(DEVICE)
+        self.embed_state = torch.nn.Linear(self.state_dim, hidden_size).to(DEVICE)
+        self.embed_action = torch.nn.Linear(self.act_dim, hidden_size).to(DEVICE)
 
-        self.embed_ln = nn.LayerNorm(hidden_size)
+        self.embed_ln = nn.LayerNorm(hidden_size).to(DEVICE)
 
         # note: we don't predict states or returns for the paper
-        self.predict_state = torch.nn.Linear(hidden_size, self.state_dim)
+        self.predict_state = torch.nn.Linear(hidden_size, self.state_dim).to(DEVICE)
         self.predict_action = nn.Sequential(
             *([nn.Linear(hidden_size, self.act_dim)] + ([nn.Tanh()] if action_tanh else []))
-        )
-        self.predict_return = torch.nn.Linear(hidden_size, 1)
+        ).to(DEVICE)
+        self.predict_return = torch.nn.Linear(hidden_size, 1).to(DEVICE)
+
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
+        self.loss_fn = loss_fn_list[loss_fn]
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
-
         batch_size, seq_length = states.shape[0], states.shape[1]
 
         if attention_mask is None:
             # attention mask for GPT: 1 if can be attended to, 0 if not
-            attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long)
+            attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long).to(DEVICE)
 
         # embed each modality with a different head
         state_embeddings = self.embed_state(states)
@@ -115,6 +135,8 @@ class DecisionTransformer(TrajectoryModel):
         action_preds = self.predict_action(x[:,1])  # predict next action given state
 
         return state_preds, action_preds, return_preds
+    
+
 
     def get_action(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
         # we don't care about the past rewards in this model
@@ -155,38 +177,103 @@ class DecisionTransformer(TrajectoryModel):
 
         return action_preds[0,-1]
     
-    def learn(self, env_id, max_epsiode, max_ep_len):
-        env = Env(env_id)
-        state = env.reset()
-        state, action, timestep ,rtg = env.states, env.action, env.timesteps, env.rtg 
-        for _ in range(max_epsiode):
-            action_dist = self.get_action(
-            states=state,
-            actions=action,
-            rewards=None,
-            returns_to_go=rtg,
-            timesteps=timestep
+    
+    def backward(self):
+        batch = self.buffer.sample()
+        losses = []
+        for traj in batch:
+            states, actions, rewards, dones, rtg, timesteps = traj
+            action_target = actions.clone()
+            _, action_preds, return_preds = self.forward(
+                states,
+                actions,
+                None,
+                rtg,
+                timesteps
             )
-            state, action, reward, rtg, timestep, done = env.step(action_dist, _)
-            if done:
-                state = env.reset()
-                state, action, timestep ,rtg = env.states, env.action, env.timesteps, env.rtg
-            self.buffer.push(state, action, reward, done, rtg, timestep)
+            self.optimizer.zero_grad()
+            loss = self.loss_fn(action_preds, action_target)
+            loss.backward()
+            losses.append(loss.item())
+            self.optimizer.step()
+            
+        return np.mean(losses)
+        
+
+            
+    
+    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50):
+        env = Env(env_id)
+        i = 0
+        r, l, r_ = [], [], []
+        losses = []
+        for episode in tqdm.tqdm(range(max_epsiode)):
+            state, action, rtg, timestep = env.reset()
+            rewards = []
+            for _ in range(max_ep_len):
+                action_dist = self.get_action(
+                states=state,
+                actions=action,
+                rewards=None,
+                returns_to_go=rtg,
+                timesteps=timestep
+                )
+                state, action, reward, rtg, timestep, done = env.step(action_dist, _)
+                if self.buffer._is_full() and i % update_rate == 0:
+                    loss = self.backward()
+                    losses.append(loss)
+                self.buffer.push(state, action, reward, done, rtg, timestep)
+                rewards.append(reward.squeeze(2)[0][-1].item())
+                i += 1
+                if done:
+                    env.reset()
+                    break
+            if episode % (max_epsiode // 10) == 0: 
+                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, mem_capacity : {self.buffer.__len__()}')
+            if self.buffer._is_full():
+                self.scheduler.step()
+            r.append(np.sum(rewards))
+            r_.append(np.mean(r))
+            l.append(np.mean(losses))
+        return r, l, r_
+                
+
             
                 
 
 
 
+"""
+
 import gym
 
-env = gym.make('CartPole-v0')
+LEN_EP = 4000
+
+env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 env.close()
 
-model = DecisionTransformer(state_dim, action_dim, 128)
-model.learn('CartPole-v2', max_epsiode=5, max_ep_len=None)
+model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=16, mem_capacity=2048)
+r, l, r_ = model.learn('CartPole-v1', max_epsiode=LEN_EP, max_ep_len=1000)
 
 
 
+plt.plot(range(LEN_EP), r)
+
+fig, axs = plt.subplots(3)
+axs[0].plot(range(LEN_EP), r)
+axs[0].set_title('Absolute reward')
+axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[1].plot(range(LEN_EP), l, 'tab:orange')
+axs[1].set_title('Loss evolution')
+axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
+axs[2].plot(range(LEN_EP), r_, 'tab:green')
+axs[2].set_title('Av reward')
+axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
+
+
+plt.show()
+
+"""
