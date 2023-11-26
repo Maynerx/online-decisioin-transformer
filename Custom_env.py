@@ -12,7 +12,7 @@ action_selector = {
 }
 
 class Env:
-    def __init__(self, env_id, num_env = 1, action_select = 'argmax'):
+    def __init__(self, env_id, num_env = 1, action_select = 'argmax', reward_scale = 1e-2):
         self.num_envs = num_env
         self.env = gym.make(env_id)
         self.state_dim = self.env.observation_space.shape[0]
@@ -20,7 +20,7 @@ class Env:
         self.state_std = 1.0
         self.state_mean = 0.0
         self.selector = action_selector[action_select]
-        self.rewards_scale = 1
+        self.rewards_scale = reward_scale
         self.use_mean = False
         self.action_range = [
             torch.tensor(0),
@@ -43,7 +43,7 @@ class Env:
         self.states = torch.cat([self.states, states], dim=1)
         self.rewards[:, - 1] = torch.tensor(rewards).to(device=device).reshape(self.num_envs, 1)
         self.action[:, -1] = action
-        pred_return = self.rtg[:, -1]  #- (rewards * self.rewards_scale)
+        pred_return = self.rtg[:, -1]  + (rewards * self.rewards_scale)
         self.rtg = torch.cat(
             [self.rtg, pred_return.reshape(self.num_envs, -1, 1)], dim=1
         )

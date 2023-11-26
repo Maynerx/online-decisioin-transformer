@@ -204,8 +204,8 @@ class DecisionTransformer(TrajectoryModel):
 
             
     
-    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False):
-        env = Env(env_id)
+    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2):
+        env = Env(env_id, reward_scale=reward_scale)
         i = 0
         r, l, r_ = [], [], []
         losses = []
@@ -246,11 +246,10 @@ class DecisionTransformer(TrajectoryModel):
 
 
 
-"""
 
 import gym
 
-LEN_EP = 4000
+LEN_EP = 1000
 
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
@@ -258,12 +257,11 @@ action_dim = env.action_space.n
 
 env.close()
 
-model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=16, mem_capacity=2048)
-r, l, r_ = model.learn('CartPole-v1', max_epsiode=LEN_EP, max_ep_len=1000)
+model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=64, mem_capacity=2048)
+r, l, r_ = model.learn('CartPole-v1', max_epsiode=LEN_EP, max_ep_len=1000, reward_scale = 1e-2)
 
 
 
-plt.plot(range(LEN_EP), r)
 
 fig, axs = plt.subplots(3)
 axs[0].plot(range(LEN_EP), r)
@@ -279,4 +277,3 @@ axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
 
 plt.show()
 
-"""
