@@ -1,4 +1,5 @@
 # Based on the original paper
+# Online Decision Transformer based on https://github.com/facebookresearch/online-dt.git
 import torch
 import torch.nn as nn
 import transformers
