@@ -12,6 +12,10 @@ import tqdm
 from tqdm import tqdm_notebook
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+BASIC_METHOD = 'basic'
+ADVENTAGES_METHOD = 'adventages'
+
+torch.backends.cudnn.benchmark = False
 
 class TrajectoryModel(nn.Module):
 
@@ -204,8 +208,8 @@ class DecisionTransformer(TrajectoryModel):
 
             
     
-    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2):
-        env = Env(env_id, reward_scale=reward_scale)
+    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
+        env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
         i = 0
         r, l, r_ = [], [], []
         losses = []
@@ -244,21 +248,20 @@ class DecisionTransformer(TrajectoryModel):
             
                 
 
-"""
 
 
 import gym
 
-LEN_EP = 1000
-
-env = gym.make('CartPole-v1')
+LEN_EP = 100
+ENV = 'MountainCar-v0'
+env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 env.close()
 
-model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=64, mem_capacity=2048)
-r, l, r_ = model.learn('CartPole-v1', max_epsiode=LEN_EP, max_ep_len=1000, reward_scale = 1e-2)
+model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=32, mem_capacity=128)
+r, l, r_ = model.learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=BASIC_METHOD)
 
 
 
@@ -276,5 +279,3 @@ axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
 
 
 plt.show()
-
-"""

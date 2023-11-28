@@ -11,8 +11,19 @@ action_selector = {
     'argmax' : lambda action : torch.argmax(action, dim=0).item()
 }
 
+def basic_reward_process(rtg, reward, reward_scale):
+    return rtg + (reward * reward_scale)
+
+def adventages_reward_process(rtg, reward, reward_scale):
+    return rtg - (reward * reward_scale)
+
+reward_used = {
+    'basic' : basic_reward_process,
+    'adventages' : adventages_reward_process
+}
+
 class Env:
-    def __init__(self, env_id, num_env = 1, action_select = 'argmax', reward_scale = 1e-2):
+    def __init__(self, env_id, num_env = 1, action_select = 'argmax', reward_method = 'basic',reward_scale = 1e-2):
         self.num_envs = num_env
         self.env = gym.make(env_id)
         self.state_dim = self.env.observation_space.shape[0]
@@ -22,6 +33,7 @@ class Env:
         self.selector = action_selector[action_select]
         self.rewards_scale = reward_scale
         self.use_mean = False
+        self.reward_method = reward_used[reward_method]
         self.action_range = [
             torch.tensor(0),
             torch.tensor(self.env.action_space.n),
@@ -29,6 +41,7 @@ class Env:
         f_states, info = self.env.reset()
         self.states, self.action, self.rewards, self.timesteps, self.rtg = self._init_output(f_states)
         self._init_return()
+
 
     def step(self, action_dist, epoch):
         action = self.selector(action_dist)
@@ -43,7 +56,7 @@ class Env:
         self.states = torch.cat([self.states, states], dim=1)
         self.rewards[:, - 1] = torch.tensor(rewards).to(device=device).reshape(self.num_envs, 1)
         self.action[:, -1] = action
-        pred_return = self.rtg[:, -1]  + (rewards * self.rewards_scale)
+        pred_return = self.reward_method(self.rtg[:, -1], rewards, self.rewards_scale)
         self.rtg = torch.cat(
             [self.rtg, pred_return.reshape(self.num_envs, -1, 1)], dim=1
         )
