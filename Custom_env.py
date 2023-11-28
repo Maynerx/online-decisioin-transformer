@@ -17,9 +17,11 @@ class Env:
         self.env = gym.make(env_id)
         try:
             self.state_dim = self.env.observation_space.shape[0]
+            self.action_dim = self.env.action_space.n
         except:
             self.state_dim = self.env.observation_space.n
-        self.action_dim = self.env.action_space.n
+            self.action_dim = len(range(int(self.env.action_space.low), int(self.env.action_space.high)))
+        
         self.state_std = 1.0
         self.state_mean = 0.0
         self.selector = action_selector[action_select]
