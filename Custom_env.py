@@ -29,10 +29,16 @@ class Env:
         self.selector = action_selector[action_select]
         self.rewards_scale = reward_scale
         self.use_mean = False
-        self.action_range = [
-            torch.tensor(0),
-            torch.tensor(self.env.action_space.n),
-        ]
+        try:
+            self.action_range = [
+                torch.tensor(0),
+                torch.tensor(self.env.action_space.n),
+            ]
+        except:
+            self.action_range = [
+                torch.tensor(self.env.action_space.low[0]),
+                torch.tensor(self.env.action_space.high[0]),
+            ]
         f_states, info = self.env.reset()
         self.states, self.action, self.rewards, self.timesteps, self.rtg = self._init_output(f_states)
         self._init_return()
