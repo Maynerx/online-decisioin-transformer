@@ -15,7 +15,10 @@ class Env:
     def __init__(self, env_id, num_env = 1, action_select = 'argmax', reward_scale = 1e-2):
         self.num_envs = num_env
         self.env = gym.make(env_id)
-        self.state_dim = self.env.observation_space.shape[0]
+        try:
+            self.state_dim = self.env.observation_space.shape[0]
+        except:
+            self.state_dim = self.env.observation_space.n
         self.action_dim = self.env.action_space.n
         self.state_std = 1.0
         self.state_mean = 0.0
