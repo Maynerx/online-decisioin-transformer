@@ -10,10 +10,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tqdm
 from tqdm import tqdm_notebook
+import torch.nn.functional as F
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 BASIC_METHOD = 'basic'
 ADVENTAGES_METHOD = 'adventages'
+BASELINE_METHOD = 'baseline'
+DISCOUNTED_METHOD = 'discounted'
+MOVING_METHOD = 'moving'
+CLIPPING_METHOD = 'clipping'
+EXP_METHOD = 'exp'
 
 torch.backends.cudnn.benchmark = False
 
@@ -38,6 +45,24 @@ class TrajectoryModel(nn.Module):
 def mean_square_loss(pred, target):
     return torch.mean((pred-target)**2)
 
+def basic(state ,action, pred_action, rtg, loss_fn):
+    loss = loss_fn(pred_action, action)
+    return loss
+
+def ppo(state, action, pred_action, rtg, loss_fn):
+    clip = 0.3
+    adventages = rtg - state
+    ratio = torch.exp(pred_action, action)
+    surr1 = adventages * ratio
+    surr2 = torch.clamp(ratio, 1-clip, 1+clip) * adventages
+    loss = -torch.min(surr1, surr1) + 0.5 * loss_fn(state, rtg)
+    return loss
+
+METHOD = {
+    'basic' : basic,
+    'PPO' : ppo
+}
+
 loss_fn_list = {
     'mse' : mean_square_loss
 }
@@ -54,6 +79,7 @@ class DecisionTransformer(TrajectoryModel):
             act_dim,
             hidden_size,
             loss_fn = 'mse',
+            loss_method = 'basic',
             lr = 1e-3,
             batch_size = 64,
             mem_capacity = 4096,
@@ -93,6 +119,7 @@ class DecisionTransformer(TrajectoryModel):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
         self.loss_fn = loss_fn_list[loss_fn]
+        self.loss_method = loss_method#METHOD[loss_method]
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
         batch_size, seq_length = states.shape[0], states.shape[1]
@@ -183,6 +210,44 @@ class DecisionTransformer(TrajectoryModel):
 
         return action_preds[0,-1]
     
+    def ppo(self, state, action, pred_action, rtg):
+        advantage = rtg - pred_action
+        epsilon = 0.3
+        value_coeff=0.5 
+        entropy_coeff=0.01
+        rtg = rtg[0, -1]
+        # PPO clip loss
+        ratio = torch.exp(pred_action - action)
+        clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
+        ppo_loss = -torch.mean(torch.min(ratio * advantage, clipped_ratio * advantage))
+        # Value loss
+        value_loss = F.mse_loss(pred_action, rtg)
+        # Entropy bonus
+        entropy_bonus = -torch.mean(pred_action * torch.exp(pred_action))
+        # Total loss
+        total_loss = ppo_loss + value_coeff * value_loss + entropy_coeff * entropy_bonus
+
+        return total_loss
+    
+    def ppo_loss(self, state, action, pred_action, rtg, clip_ratio=0.2, value_coef=0.5, entropy_coef=0.01):
+        #print(action.size(), (torch.log_softmax(action, dim=0)))
+        advantage = rtg - pred_action.detach()
+        # Calculate surrogate loss
+        ratio = torch.exp(torch.log_softmax(action, dim=0) - torch.log_softmax(pred_action, dim=0))
+        surr1 = ratio * advantage
+        surr2 = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantage
+        policy_loss = -torch.min(surr1, surr2).mean()
+        # Calculate value loss
+        value_loss = F.mse_loss(pred_action, action)
+        # Calculate entropy loss
+        entropy = -torch.sum(F.softmax(action, dim=1) * torch.log_softmax(pred_action, dim=1), dim=1).mean()
+        # Final loss
+        loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
+        return loss
+    
+    def basic(self, state, action, pred_action, rtg):
+        loss = self.loss_fn(pred_action, action)
+        return loss
     
     def backward(self):
         batch = self.buffer.sample()
@@ -197,8 +262,9 @@ class DecisionTransformer(TrajectoryModel):
                 rtg,
                 timesteps
             )
+            #action_preds = action_preds[0,-1]
             self.optimizer.zero_grad()
-            loss = self.loss_fn(action_preds, action_target)
+            loss = self.ppo(states, action_target, action_preds, rtg)
             loss.backward()
             losses.append(loss.item())
             self.optimizer.step()
@@ -238,7 +304,8 @@ class DecisionTransformer(TrajectoryModel):
             if episode % (max_epsiode // 10) == 0: 
                 print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, mem_capacity : {self.buffer.__len__()}')
             if self.buffer._is_full():
-                self.scheduler.step()
+                pass
+                #self.scheduler.step()
             r.append(np.sum(rewards))
             r_.append(np.mean(r))
             l.append(np.mean(losses))
@@ -248,20 +315,20 @@ class DecisionTransformer(TrajectoryModel):
             
                 
 
-
+'''
 
 import gym
 
-LEN_EP = 100
-ENV = 'MountainCar-v0'
+LEN_EP = 800
+ENV = 'CartPole-v0'
 env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 env.close()
 
-model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-3, batch_size=32, mem_capacity=128)
-r, l, r_ = model.learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=BASIC_METHOD)
+model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-5, batch_size=32, mem_capacity=4096)
+r, l, r_ = model.learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=CLIPPING_METHOD)
 
 
 
@@ -279,3 +346,4 @@ axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
 
 
 plt.show()
+'''

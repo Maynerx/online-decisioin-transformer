@@ -11,15 +11,99 @@ action_selector = {
     'argmax' : lambda action : torch.argmax(action, dim=0).item()
 }
 
-def basic_reward_process(rtg, reward, reward_scale):
+def basic_reward_process(rtg, reward, reward_scale, all_reward):
     return rtg + (reward * reward_scale)
 
-def adventages_reward_process(rtg, reward, reward_scale):
-    return rtg - (reward * reward_scale)
+def adventages_reward_process(rtg, reward, reward_scale, all_reward):
+    return rtg 
+
+def basic_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the difference between current reward and previous return-to-go
+    reward_difference = current_rewards - current_rtg
+
+    # Scale the difference by a factor
+    scaled_difference = scale_factor * reward_difference
+
+    # Add the scaled difference to the previous return-to-go
+    pred_return = current_rtg + scaled_difference
+
+    return pred_return
+
+def baseline_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the difference between current rewards and a moving average baseline
+    baseline = previous_rewards.mean(dim=1, keepdim=True)
+    reward_difference = current_rewards - baseline
+
+    # Scale the difference by a factor
+    scaled_difference = scale_factor * reward_difference
+
+    # Add the scaled difference to the previous return-to-go
+    pred_return = current_rtg + scaled_difference
+
+    return pred_return
+
+def discounted_sum_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the discounted sum of future rewards
+    current_rewards = torch.tensor(current_rewards).unsqueeze(0).to(device)
+    discount_factor = 0.95
+    discounted_sum = torch.cumsum(current_rewards.flip(dims=[0]), dim=0).flip(dims=[0])
+    
+    # Scale the discounted sum by a factor
+    scaled_discounted_sum = scale_factor * discounted_sum
+
+    # Add the scaled discounted sum to the previous return-to-go
+    pred_return = current_rtg + scaled_discounted_sum
+
+    return pred_return
+
+def moving_average_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the moving average of recent rewards
+    window_size = 10
+    moving_avg = torch.mean(previous_rewards[:, -window_size:], dim=1, keepdim=True)
+    
+    # Scale the moving average by a factor
+    scaled_avg = scale_factor * moving_avg
+
+    # Add the scaled moving average to the previous return-to-go
+    pred_return = current_rtg + scaled_avg
+
+    return pred_return
+
+def reward_clipping_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Clip the current rewards within a certain range
+    current_rewards = torch.tensor([current_rewards]).to(device)
+    clipped_rewards = torch.clamp(current_rewards, -1, 1)
+    
+    # Scale the clipped rewards by a factor
+    scaled_clipped_rewards = scale_factor * clipped_rewards
+
+    # Add the scaled clipped rewards to the previous return-to-go
+    pred_return = current_rtg + scaled_clipped_rewards
+
+    return pred_return
+
+def exp_moving_average_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the exponential moving average of recent rewards
+    alpha = 0.1
+    exp_moving_avg = alpha * current_rewards + (1 - alpha) * previous_rewards[:, -1].unsqueeze(1)
+    
+    # Scale the exponential moving average by a factor
+    scaled_exp_avg = scale_factor * exp_moving_avg
+
+    # Add the scaled exponential moving average to the previous return-to-go
+    pred_return = current_rtg + scaled_exp_avg
+
+    return pred_return
 
 reward_used = {
-    'basic' : basic_reward_process,
-    'adventages' : adventages_reward_process
+    'basic' : basic_reward_method,
+    'adventages' : adventages_reward_process,
+    'baseline' : baseline_reward_method,
+    'discounted' : discounted_sum_reward_method,
+    'moving' : moving_average_reward_method,
+    'clipping' : reward_clipping_method,
+    'exp' : exp_moving_average_reward_method
+
 }
 
 class Env:
@@ -56,7 +140,7 @@ class Env:
         self.states = torch.cat([self.states, states], dim=1)
         self.rewards[:, - 1] = torch.tensor(rewards).to(device=device).reshape(self.num_envs, 1)
         self.action[:, -1] = action
-        pred_return = self.reward_method(self.rtg[:, -1], rewards, self.rewards_scale)
+        pred_return = self.reward_method(self.rtg[:, -1], rewards, self.rewards_scale, self.rewards)
         self.rtg = torch.cat(
             [self.rtg, pred_return.reshape(self.num_envs, -1, 1)], dim=1
         )
