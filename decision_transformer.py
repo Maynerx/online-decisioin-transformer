@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import tqdm
 from tqdm import tqdm_notebook
 import torch.nn.functional as F
+from rollout_buffer import RolloutBuffer
+from PPO_loss import classic_ppo
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -97,6 +99,8 @@ class DecisionTransformer(TrajectoryModel):
             **kwargs
         )
         self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)
+        self.rollout_buffer  = RolloutBuffer(buffer_size=mem_capacity, state_dim=state_dim, action_dim=act_dim)
+        self.batch_size = batch_size
 
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
@@ -249,6 +253,7 @@ class DecisionTransformer(TrajectoryModel):
         loss = self.loss_fn(pred_action, action)
         return loss
     
+    
     def backward(self):
         batch = self.buffer.sample()
         losses = []
@@ -270,9 +275,70 @@ class DecisionTransformer(TrajectoryModel):
             self.optimizer.step()
             
         return np.mean(losses)
-        
+    
 
-            
+    def Backward(self):
+        losses = []
+        for rollout_batch in self.rollout_buffer.get_batch(self.batch_size):
+            states = rollout_batch['states']
+            action = rollout_batch['actions']
+            next_states = rollout_batch['next_states']
+            rtg = rollout_batch['rtg']
+            timesteps = rollout_batch['timestep']
+            reward = rollout_batch['rewards']
+            action_target = action.clone()
+            _, action_preds, return_preds = self.forward(
+                next_states,
+                action_target,
+                None,
+                rtg,
+                timesteps
+            )
+            self.optimizer.zero_grad()
+            loss = self.ppo_loss(states, action_target, action_preds, rtg)#classic_ppo(states, action_target, action_preds, rtg, next_states, reward)
+            losses.append(loss.item())
+            loss.backward()
+            self.optimizer.step()
+        return np.mean(losses)
+
+        
+    def Learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
+        env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
+        i = 0
+        r, l, r_ = [], [], []
+        losses = []
+        f = tqdm.tqdm if not notebook else tqdm_notebook
+        for episode in f(range(max_epsiode)):
+            state, action, rtg, timestep = env.reset()
+            rewards = []
+            for _ in range(max_ep_len):
+                old_state = state.clone()
+                action_dist = self.get_action(
+                states=state,
+                actions=action,
+                rewards=None,
+                returns_to_go=rtg,
+                timesteps=timestep
+                )
+                state, action, reward, rtg, timestep, done = env.step(action_dist, _)
+                self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep)
+                loss = self.Backward()
+                losses.append(loss)
+                rewards.append(reward.squeeze(2)[0][-1].item())
+                i += 1
+                if done:
+                    env.reset()
+                    break
+            if episode % (max_epsiode // 10) == 0: 
+                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, mem_capacity : {self.buffer.__len__()}')
+            if self.buffer._is_full():
+                pass
+                #self.scheduler.step()
+            r.append(np.sum(rewards))
+            r_.append(np.mean(r))
+            l.append(np.mean(losses))
+        return r, l, r_
+    
     
     def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
         env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
@@ -312,14 +378,14 @@ class DecisionTransformer(TrajectoryModel):
         return r, l, r_
                 
 
-            
+# TODO : Create a new Backward method to implement the rollout buffer and then Add a third PPO method. We might need to create another Learn function with the R buffer
+
                 
-
-'''
-
+# ! We had to add the rollout buffer method
+"""
 import gym
 
-LEN_EP = 800
+LEN_EP = 400
 ENV = 'CartPole-v0'
 env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
@@ -327,8 +393,8 @@ action_dim = env.action_space.n
 
 env.close()
 
-model = DecisionTransformer(state_dim, action_dim, 192, lr=1e-5, batch_size=32, mem_capacity=4096)
-r, l, r_ = model.learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=CLIPPING_METHOD)
+model = DecisionTransformer(state_dim, action_dim, 12, lr=1e-5, batch_size=1, mem_capacity=4096)
+r, l, r_ = model.Learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=CLIPPING_METHOD)
 
 
 
@@ -346,4 +412,4 @@ axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
 
 
 plt.show()
-'''
+"""
