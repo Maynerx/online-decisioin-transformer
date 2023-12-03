@@ -278,9 +278,10 @@ class DecisionTransformer(TrajectoryModel):
         return np.mean(losses)
     
 
-    def Backward(self):
+    def Backward(self, update_rate = 1):
         losses = []
-        for rollout_batch in self.rollout_buffer.get_batch(self.batch_size):
+        for i in range(update_rate):
+            rollout_batch = self.rollout_buffer.get_batch()
             states = rollout_batch['states']
             action = rollout_batch['actions']
             next_states = rollout_batch['next_states']

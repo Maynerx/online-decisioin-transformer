@@ -46,21 +46,9 @@ class RolloutBuffer:
         }
         return batch
     
-    def __generate__(self, batch_size):
-        arr = []
-        while len(arr) < batch_size:
-            n = np.random.randint(0, self.index if not self.full else self.buffer_size)
-            if not n in arr:
-                arr.append(n)
-        return arr
+    def __generate__(self):
+        n = np.random.randint(0, self.index if not self.full else self.buffer_size)
+        return n
 
-    def get_batch(self, batch_size):
-        batchs = []
-        # Échantillonne aléatoirement un lot de données à partir du buffer
-        if not self.full and self.index < batch_size:
-            indices = range(self.index)
-        else:
-            indices = self.__generate__(batch_size)
-        for i in indices: 
-            batchs.append(self.__get_sample__(i))
-        return batchs
+    def get_batch(self):
+        return self.__get_sample__(self.__generate__())
