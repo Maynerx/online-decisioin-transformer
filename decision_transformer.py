@@ -417,7 +417,7 @@ action_dim = env.action_space.n
 env.close()
 
 model = DecisionTransformer(state_dim, action_dim, 12, lr=1e-5, batch_size=1, mem_capacity=4096)
-r, l, r_ = model.Learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=CLIPPING_METHOD)
+r, l, r_ = model.Learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=BASIC_METHOD)
 
 
 

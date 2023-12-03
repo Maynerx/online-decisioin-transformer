@@ -19,14 +19,7 @@ def adventages_reward_process(rtg, reward, reward_scale, all_reward):
 
 def basic_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
     # Calculate the difference between current reward and previous return-to-go
-    reward_difference = current_rewards - current_rtg
-
-    # Scale the difference by a factor
-    scaled_difference = scale_factor * reward_difference
-
-    # Add the scaled difference to the previous return-to-go
-    pred_return = current_rtg + scaled_difference
-
+    pred_return = current_rtg - (current_rewards * scale_factor)
     return pred_return
 
 def baseline_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
