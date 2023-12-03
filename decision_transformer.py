@@ -124,6 +124,7 @@ class DecisionTransformer(TrajectoryModel):
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
         self.loss_fn = loss_fn_list[loss_fn]
         self.loss_method = loss_method#METHOD[loss_method]
+        self.lr = lr
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
         batch_size, seq_length = states.shape[0], states.shape[1]
@@ -300,9 +301,26 @@ class DecisionTransformer(TrajectoryModel):
             loss.backward()
             self.optimizer.step()
         return np.mean(losses)
-
+    
+    def _init_sc(self, val):
+        def constant(_):
+            return val
+        return constant
+    
+    def _init_model(self):
+        self.lr_scheduler = self._init_sc(self.lr)
+    
+    def _update_schedule(self, ep, max_ep):
+        c = 1.0 - float(ep) / float(max_ep)
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = self.lr_scheduler(c)
+    
+    def get_lr(self):
+        for param_group in self.optimizer.param_groups:
+            return param_group["lr"]
         
     def Learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
+        self._init_model()
         env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
         i = 0
         r, l, r_ = [], [], []
@@ -311,6 +329,8 @@ class DecisionTransformer(TrajectoryModel):
         for episode in f(range(max_epsiode)):
             state, action, rtg, timestep = env.reset()
             rewards = []
+            self._update_schedule(episode, max_epsiode)
+            #print(self.optimizer.param_groups)
             for _ in range(max_ep_len):
                 old_state = state.clone()
                 action_dist = self.get_action(
@@ -330,7 +350,7 @@ class DecisionTransformer(TrajectoryModel):
                     env.reset()
                     break
             if episode % (max_epsiode // 10) == 0: 
-                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, mem_capacity : {self.buffer.__len__()}')
+                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, lr : {self.get_lr()}')
             if self.buffer._is_full():
                 pass
                 #self.scheduler.step()
@@ -382,7 +402,9 @@ class DecisionTransformer(TrajectoryModel):
 
                 
 # ! We had to add the rollout buffer method
-"""
+
+'''
+
 import gym
 
 LEN_EP = 400
@@ -412,4 +434,4 @@ axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
 
 
 plt.show()
-"""
+'''
