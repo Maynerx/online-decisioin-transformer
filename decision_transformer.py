@@ -331,11 +331,12 @@ class DecisionTransformer(TrajectoryModel):
             state, action, rtg, timestep = env.reset()
             rewards = []
             self._update_schedule(episode, max_epsiode)
+            state_std, state_mean = state.std(), state.mean()
             #print(self.optimizer.param_groups)
             for _ in range(max_ep_len):
                 old_state = state.clone()
                 action_dist = self.get_action(
-                states=state,
+                states=(state - state_std) / state_mean,
                 actions=action,
                 rewards=None,
                 returns_to_go=rtg,
