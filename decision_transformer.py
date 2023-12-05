@@ -83,6 +83,8 @@ class DecisionTransformer(TrajectoryModel):
             loss_fn = 'mse',
             loss_method = 'basic',
             lr = 1e-3,
+            scheduler_step = 100,
+            scheduler_gamma = 0.1,
             batch_size = 64,
             mem_capacity = 4096,
             max_length=None,
@@ -121,7 +123,7 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_return = torch.nn.Linear(hidden_size, 1).to(DEVICE)
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=scheduler_step, gamma=scheduler_gamma)
         self.loss_fn = loss_fn_list[loss_fn]
         self.loss_method = loss_method#METHOD[loss_method]
         self.lr = lr
@@ -313,8 +315,7 @@ class DecisionTransformer(TrajectoryModel):
     
     def _update_schedule(self, ep, max_ep):
         c = 1.0 - float(ep) / float(max_ep)
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = self.lr_scheduler(c)
+        self.scheduler.step()
     
     def get_lr(self):
         for param_group in self.optimizer.param_groups:
