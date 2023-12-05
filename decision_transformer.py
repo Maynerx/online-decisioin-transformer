@@ -331,7 +331,6 @@ class DecisionTransformer(TrajectoryModel):
         for episode in f(range(max_epsiode)):
             state, action, rtg, timestep = env.reset()
             rewards = []
-            self._update_schedule(episode, max_epsiode)
             state_std, state_mean = state.std(), state.mean()
             #print(self.optimizer.param_groups)
             for _ in range(max_ep_len):
@@ -346,6 +345,7 @@ class DecisionTransformer(TrajectoryModel):
                 state, action, reward, rtg, timestep, done = env.step(action_dist, _)
                 self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep)
                 loss = self.Backward()
+                self._update_schedule(episode, max_epsiode)
                 losses.append(loss)
                 rewards.append(reward.squeeze(2)[0][-1].item())
                 i += 1
