@@ -76,10 +76,10 @@ class DT_PPO:
 
         return loss.item()
     
-    def Learn(self, timesteps, env, notebook = True, reward_scale = 1e-4, max_timestep = 1000):
+    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
         i = 0
-        r, l, r_ = [], [], []
+        r, l, r_, r__ = [], [], [], []
         losses = []
         f = tqdm.tqdm(total=timesteps) if not notebook else tqdm_notebook(total=timesteps)
         while i <= timesteps:
@@ -102,7 +102,7 @@ class DT_PPO:
                 rewards.append(reward.squeeze(2)[0][-1].item())
                 i += 1
                 if i % (timesteps // 10) == 0: 
-                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(l)}')
+                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r[5:])}, loss : {loss}')
                 f.update(1)
                 if done:
                     env.reset()
@@ -110,9 +110,10 @@ class DT_PPO:
                 
             r.append(np.sum(rewards))
             r_.append(np.mean(r))
+            r__.append(np.mean(r[5:]))
             l.append(np.mean(losses))
 
-        return r, l, r_
+        return r, l, r_, r__
 
 import gym
 
@@ -121,16 +122,16 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e4)
+LEN_EP = int(1e3)
 
 env.close()
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=12)
-r, l, r_ = agent.Learn(LEN_EP, ENV, notebook=False)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=12, clip=0.3)
+r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False)
 
 L = len(r)
 
-fig, axs = plt.subplots(3)
+fig, axs = plt.subplots(4)
 axs[0].plot(range(L), r)
 axs[0].set_title('Absolute reward')
 axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
@@ -140,6 +141,9 @@ axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
 axs[2].plot(range(L), r_, 'tab:green')
 axs[2].set_title('Av reward')
 axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[3].set_title('Av reward cut 5')
+axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[3].plot(range(L), r__, 'tab:red')
 
 
 plt.show()
