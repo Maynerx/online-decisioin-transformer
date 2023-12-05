@@ -138,6 +138,25 @@ class Env:
             [self.rtg, pred_return.reshape(self.num_envs, -1, 1)], dim=1
         )
         return self.states, self.action, self.rewards, self.rtg, self.timesteps, done
+    
+    def step_(self, action_dist, epoch):
+        action = self.selector(action_dist)
+        if self.use_mean:
+            action = action_dist.mean.reshape(self.num_envs, -1, self.act_dim)[:, -1]
+        #action = action.clamp(*self.action_range)
+        states, rewards, done, _, info = self.env.step(action)
+        states = (
+            torch.from_numpy(states).to(device=device).reshape(self.num_envs, -1, self.state_dim)
+        )
+        #self._process(epoch)
+        self.states = torch.cat([states], dim=1)
+        self.rewards[:, -1] = torch.tensor(rewards).to(device=device).reshape(self.num_envs, 1)
+        self.action[:, -1] = action
+        pred_return = self.reward_method(self.rtg[:, 0], rewards, self.rewards_scale, self.rewards)
+        self.rtg = torch.cat(
+            [pred_return.reshape(self.num_envs, -1, 1)], dim=1
+        )
+        return self.states, self.action, self.rewards, self.rtg, self.timesteps, done, action
         
     def _reset_env(self):
         f_states, info = self.env.reset()

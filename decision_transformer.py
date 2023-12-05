@@ -120,6 +120,7 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_action = nn.Sequential(
             *([nn.Linear(hidden_size, self.act_dim)] + ([nn.Tanh()] if action_tanh else []))
         ).to(DEVICE)
+        self.critic = nn.Linear(hidden_size, 1).to(DEVICE)
         self.predict_return = torch.nn.Linear(hidden_size, 1).to(DEVICE)
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -173,8 +174,9 @@ class DecisionTransformer(TrajectoryModel):
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
         state_preds = self.predict_state(x[:,2])    # predict next state given state and action
         action_preds = self.predict_action(x[:,1])  # predict next action given state
+        value = self.critic(x[:,1])
 
-        return state_preds, action_preds, return_preds
+        return state_preds, action_preds, return_preds, value
     
 
 
@@ -212,7 +214,7 @@ class DecisionTransformer(TrajectoryModel):
         else:
             attention_mask = None
 
-        _, action_preds, return_preds = self.forward(
+        _, action_preds, return_preds, value = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
 
         return action_preds[0,-1]

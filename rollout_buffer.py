@@ -15,12 +15,13 @@ class RolloutBuffer:
         self.dones = [0]*self.buffer_size
         self.rtg = [0]*self.buffer_size
         self.timestep = [0]*self.buffer_size
+        self.great_action = [0]*self.buffer_size
 
         # Indice du dernier élément dans le buffer
         self.index = 0
         self.full = False
 
-    def add_experience(self, state, action, reward, next_state, done, rtg, timestep):
+    def add_experience(self, state, action, reward, next_state, done, rtg, timestep, great_action):
         self.states[self.index] = state
         self.actions[self.index] = action
         self.rewards[self.index] = reward
@@ -28,6 +29,7 @@ class RolloutBuffer:
         self.dones[self.index] = done
         self.rtg[self.index] = rtg
         self.timestep[self.index] = timestep
+        self.great_action[self.index] = great_action
 
         # Met à jour l'indice et le drapeau indiquant si le buffer est plein
         self.index = (self.index + 1) % self.buffer_size
@@ -42,7 +44,8 @@ class RolloutBuffer:
             'next_states': self.next_states[indice],
             'dones': self.dones[indice],
             'rtg' : self.rtg[indice],
-            'timestep' : self.timestep[indice]
+            'timestep' : self.timestep[indice],
+            'great_action' : self.great_action[indice]
         }
         return batch
     
