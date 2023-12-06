@@ -115,6 +115,8 @@ class DT_PPO:
 
         return r, l, r_, r__
 
+"""
+
 import gym
 
 ENV = 'CartPole-v0'
@@ -147,3 +149,5 @@ axs[3].plot(range(L), r__, 'tab:red')
 
 
 plt.show()
+
+"""
