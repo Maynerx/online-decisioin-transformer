@@ -1,6 +1,9 @@
 import torch
 import numpy as np
 
+
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 class RolloutBuffer:
     def __init__(self, buffer_size, state_dim, action_dim):
         self.buffer_size = buffer_size
@@ -52,6 +55,33 @@ class RolloutBuffer:
     def __generate__(self):
         n = np.random.randint(0, self.index if not self.full else self.buffer_size)
         return n
+    
+
+    def get_batchs(self, batch_size):
+        g = [self.__get_sample__(np.random.randint(0, self.index if not self.full else self.buffer_size)) for i in range(batch_size)]
+        st = [i['states'].tolist() for i in g]
+        ac = [i['actions'].tolist() for i in g]
+        re = [i['rewards'].tolist() for i in g]
+        ns = [i['next_states'].tolist() for i in g]
+        do = [i['dones'] for i in g]
+        rt = [i['rtg'].tolist() for i in g]
+        ti = [i['timestep'].tolist() for i in g]
+        ga = [i['great_action'] for i in g]
+
+        
+
+        batchs = {
+            'states': torch.tensor(st).to(DEVICE),
+            'actions': torch.tensor(ac).to(DEVICE),
+            'rewards': torch.tensor(re).to(DEVICE),
+            'next_states': torch.tensor(ns).to(DEVICE),
+            'dones': torch.tensor(do).to(DEVICE),
+            'rtg' : torch.tensor(rt).to(DEVICE),
+            'timestep' : torch.tensor(ti).to(DEVICE),
+            'great_action' : torch.tensor(ga).to(DEVICE)
+        }
+        return batchs
+        
 
     def get_batch(self):
         return self.__get_sample__(self.__generate__())

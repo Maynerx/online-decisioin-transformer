@@ -9,10 +9,13 @@ def check_nan(tensor):
 
 
 class DT_PPO:
-    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2):
+    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10):
         self.dt = DecisionTransformer(state_dim, action_dim, hidden_size)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.gamma = gamma
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.epoch = epoch
         self.eps_clip = clip
         self.rollout_buffer = RolloutBuffer(buffer_size=50000, state_dim=state_dim, action_dim=action_dim)
     
@@ -67,14 +70,58 @@ class DT_PPO:
         surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
         actor_loss = -torch.min(surr1, surr2).mean()
         critic_loss = F.mse_loss(value, reward + self.gamma * (1-done) * next_value.detach())
-        entropy = -torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-        loss = actor_loss + 0.5 * critic_loss - 0.01 * entropy
+        entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
+        loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
         return loss.item()
+    
+    def update_(self):
+        l = []
+        batch_size = 2
+        for _ in range(self.epoch):
+            batch = self.rollout_buffer.get_batchs(batch_size)
+            state = batch['states'].reshape((batch_size, 1, self.state_dim))
+            old_action_prob = batch['actions'].reshape((batch_size, 1, self.action_dim))
+            reward = batch['rewards'].reshape((batch_size, 1, 1))
+            next_state = batch['next_states'].reshape((batch_size, 1, self.state_dim))
+            done = batch['dones'].reshape((batch_size, 1)).int()
+            rtg = batch['rtg'].reshape((batch_size, 1, 1))
+            timestep = batch['timestep'].reshape((batch_size, 1))
+            action = batch['great_action'].reshape((batch_size, 1))
+    
+            _, action_preds, return_preds, value = self.dt.forward(
+                state,
+                old_action_prob,
+                None,
+                rtg,
+                timestep
+            )
+            s_, _, _1, next_value = self.dt.forward(
+                next_state,
+                action_preds,
+                None,
+                rtg,
+                timestep
+            )
+            adventages = reward + self.gamma * (1-done) * next_value - value
+            ratio = (action_preds - old_action_prob).mean()
+            surr1 = ratio * adventages
+            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = F.mse_loss(value, reward + self.gamma * (1-done) * next_value.detach())
+            entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
+            loss = actor_loss + 0.01 * entropy + 0.5 * critic_loss  
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            l.append(loss.item())
+
+        return np.mean(l)
     
     def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
@@ -90,7 +137,7 @@ class DT_PPO:
             for _ in range(max_timestep):
                 old_state = state.clone()
                 action_dist = self.get_action(
-                state=(state - state_std) / state_mean,
+                state=state,
                 action=action,
                 rtg=rtg,
                 timestep=timestep
@@ -115,8 +162,8 @@ class DT_PPO:
 
         return r, l, r_, r__
 
-"""
 
+"""
 import gym
 
 ENV = 'CartPole-v0'
@@ -124,11 +171,11 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e3)
+LEN_EP = int(4e3)
 
 env.close()
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=12, clip=0.3)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
 r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False)
 
 L = len(r)
