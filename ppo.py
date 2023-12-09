@@ -63,13 +63,13 @@ class DT_PPO:
         )
         check_nan(next_value)
         check_nan(value)
-        adventages = reward + self.gamma * (1-done) * next_value - value
+        adventages = rtg + self.gamma * (1-done) * next_value - value
         
         ratio = (action_preds - old_action_prob).mean()
         surr1 = ratio * adventages
         surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
         actor_loss = -torch.min(surr1, surr2).mean()
-        critic_loss = F.mse_loss(value, reward + self.gamma * (1-done) * next_value.detach())
+        critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
         entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
         loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy
 
@@ -163,20 +163,20 @@ class DT_PPO:
         return r, l, r_, r__
 
 
-"""
+'''
 import gym
 
-ENV = 'CartPole-v0'
+ENV = 'LunarLander-v2'
 env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(4e3)
+LEN_EP = int(1e4)
 
 env.close()
 
 agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
-r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False)
+r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-4)
 
 L = len(r)
 
@@ -197,4 +197,4 @@ axs[3].plot(range(L), r__, 'tab:red')
 
 plt.show()
 
-"""
+'''
