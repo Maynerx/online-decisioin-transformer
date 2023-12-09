@@ -1,4 +1,5 @@
 from decision_transformer import *
+import json
 #torch.autograd.set_detect_anomaly(True)
 
 
@@ -15,6 +16,7 @@ class DT_PPO:
         self.gamma = gamma
         self.state_dim = state_dim
         self.action_dim = action_dim
+        self.lr = lr
         self.epoch = epoch
         self.eps_clip = clip
         self.rollout_buffer = RolloutBuffer(buffer_size=50000, state_dim=state_dim, action_dim=action_dim)
@@ -123,9 +125,36 @@ class DT_PPO:
 
         return np.mean(l)
     
-    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
-        env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
+    def save(self, path):
+        torch.save(self.dt, f'{path}/model.pt')
+        with open(f'{path}/param.json', 'w+') as f:
+            d = {
+                'lr' : self.lr,
+                'gamma' : self.gamma,
+                'state_dim' : self.state_dim,
+                'action_dim' : self.action_dim,
+                'eps_clip' : self.eps_clip
+            }
+            json.dump(d, f)
+        
+
+    def load(path):
+        dt = torch.load(f'{path}/model.pt')
+        with open(f'{path}/param.json', 'r+') as f:
+            param = json.load(f)
+        lr = param['lr']
+        gamma = param['gamma']
+        state_dim = param['state_dim']
+        action_dim = param['action_dim']
+        eps_clip = param['eps_clip']
+        ppo = DT_PPO(state_dim, action_dim, 12, lr, gamma, eps_clip)
+        ppo.dt = dt
+        return ppo
+    
+    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000, num_env = 1):
+        env = Mult_Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD, num_env=num_env)
         i = 0
+        j = 0
         r, l, r_, r__ = [], [], [], []
         losses = []
         f = tqdm.tqdm(total=timesteps) if not notebook else tqdm_notebook(total=timesteps)
@@ -136,22 +165,25 @@ class DT_PPO:
             #print(self.optimizer.param_groups)
             for _ in range(max_timestep):
                 old_state = state.clone()
-                action_dist = self.get_action(
+                _ , action_dist = self.get_action(
                 state=state,
                 action=action,
                 rtg=rtg,
                 timestep=timestep
                 )
+                action_dist = action_dist.reshape((num_env, 1, self.action_dim))
                 state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
                 self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep, great_action)
                 loss = self.update()
                 losses.append(loss)
                 rewards.append(reward.squeeze(2)[0][-1].item())
-                i += 1
-                if i % (timesteps // 10) == 0: 
-                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r[5:])}, loss : {loss}')
-                f.update(1)
-                if done:
+                i += num_env
+                k = i / timesteps
+                if k >= j: 
+                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r[2:])}, loss : {loss}')
+                    j += 0.1
+                f.update(num_env)
+                if 1 in done:
                     env.reset()
                     break
                 
@@ -171,30 +203,33 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e4)
+LEN_EP = int(5e4)
 
 env.close()
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
-r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-4)
+if __name__ == '__main__':
 
-L = len(r)
+    agent = DT_PPO.load('bin')#DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
+    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-4, num_env=4)
 
-fig, axs = plt.subplots(4)
-axs[0].plot(range(L), r)
-axs[0].set_title('Absolute reward')
-axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[1].plot(range(L), l, 'tab:orange')
-axs[1].set_title('Loss evolution')
-axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
-axs[2].plot(range(L), r_, 'tab:green')
-axs[2].set_title('Av reward')
-axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[3].set_title('Av reward cut 5')
-axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[3].plot(range(L), r__, 'tab:red')
+    L = len(r)
+
+    fig, axs = plt.subplots(4)
+    axs[0].plot(range(L), r)
+    axs[0].set_title('Absolute reward')
+    axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
+    axs[1].plot(range(L), l, 'tab:orange')
+    axs[1].set_title('Loss evolution')
+    axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
+    axs[2].plot(range(L), r_, 'tab:green')
+    axs[2].set_title('Av reward')
+    axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
+    axs[3].set_title('Av reward cut 5')
+    axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
+    axs[3].plot(range(L), r__, 'tab:red')
 
 
-plt.show()
+    plt.show()
 
+    #agent.save('bin')
 '''

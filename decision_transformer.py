@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import transformers
 from transformers import GPT2Model
-from Custom_env import Env
+from Custom_env import Env, Mult_Env
 from replay_buffer import Custom_Buffer
 import numpy as np
 import matplotlib.pyplot as plt
@@ -216,8 +216,7 @@ class DecisionTransformer(TrajectoryModel):
 
         _, action_preds, return_preds, value = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
-
-        return action_preds[0,-1]
+        return action_preds[0,-1], action_preds
     
     def ppo(self, state, action, pred_action, rtg):
         advantage = rtg - pred_action
