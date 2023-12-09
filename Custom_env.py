@@ -19,10 +19,16 @@ def basic_reward_process(rtg, reward, reward_scale, all_reward):
 def adventages_reward_process(rtg, reward, reward_scale, all_reward):
     return rtg 
 
+'''
 def basic_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
     # Calculate the difference between current reward and previous return-to-go
     current_rewards = torch.tensor(current_rewards).unsqueeze(1).to(device)
     pred_return = current_rtg - (torch.tensor(current_rewards).to(device) * scale_factor)
+    return pred_return.float()
+'''
+def basic_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
+    # Calculate the difference between current reward and previous return-to-go
+    pred_return = current_rtg - (current_rewards * scale_factor)
     return pred_return.float()
 
 def baseline_reward_method(current_rtg, current_rewards, scale_factor, previous_rewards):
