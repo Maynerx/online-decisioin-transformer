@@ -63,10 +63,10 @@ class RolloutBuffer:
         ac = [i['actions'].tolist() for i in g]
         re = [i['rewards'].tolist() for i in g]
         ns = [i['next_states'].tolist() for i in g]
-        do = [i['dones'] for i in g]
+        do = [i['dones'].tolist() for i in g]
         rt = [i['rtg'].tolist() for i in g]
         ti = [i['timestep'].tolist() for i in g]
-        ga = [i['great_action'] for i in g]
+        ga = [i['great_action'].tolist() for i in g]
 
         
 

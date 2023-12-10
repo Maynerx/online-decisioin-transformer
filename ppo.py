@@ -83,7 +83,7 @@ class DT_PPO:
     
     def update_(self):
         l = []
-        batch_size = 2
+        batch_size = 4
         for _ in range(self.epoch):
             batch = self.rollout_buffer.get_batchs(batch_size)
             state = batch['states'].reshape((batch_size, 1, self.state_dim))
@@ -151,9 +151,10 @@ class DT_PPO:
         ppo.dt = dt
         return ppo
     
-    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
-        env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
+    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000, num_env = 1):
+        env = Mult_Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD, num_env=num_env)
         i = 0
+        j = 0
         r, l, r_, r__ = [], [], [], []
         losses = []
         f = tqdm.tqdm(total=timesteps) if not notebook else tqdm_notebook(total=timesteps)
@@ -164,7 +165,7 @@ class DT_PPO:
             #print(self.optimizer.param_groups)
             for _ in range(max_timestep):
                 old_state = state.clone()
-                action_dist = self.get_action(
+                _ ,action_dist = self.get_action(
                 state=state,
                 action=action,
                 rtg=rtg,
@@ -174,12 +175,14 @@ class DT_PPO:
                 self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep, great_action)
                 loss = self.update()
                 losses.append(loss)
-                rewards.append(reward.squeeze(2)[0][-1].item())
-                i += 1
-                if i % (timesteps // 10) == 0: 
+                rewards.append(reward.mean().item())
+                i += num_env
+                k = i/timesteps
+                if k >= j:
+                    j += 0.1
                     print(f'timestep : {i}, reward_mean_sum : {np.mean(r[5:])}, loss : {loss}')
-                f.update(1)
-                if done:
+                f.update(num_env)
+                if 1 in done:
                     env.reset()
                     break
                 
@@ -194,19 +197,19 @@ class DT_PPO:
 
 import gym
 
-ENV = 'LunarLander-v2'
+ENV = 'CartPole-v0'
 env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e3)
+LEN_EP = int(7e3)
 
 env.close()
 
 if __name__ == '__main__':
 
-    agent = DT_PPO.load('bin')#DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
-    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-4)
+    agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
+    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-2, num_env=2)
 
     L = len(r)
 
@@ -228,3 +231,5 @@ if __name__ == '__main__':
     plt.show()
 
     #agent.save('bin')
+
+from stable_baselines3 import PPO
