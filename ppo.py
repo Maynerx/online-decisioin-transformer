@@ -32,69 +32,18 @@ class DT_PPO:
         return action_dist
     
     def update(self):
-        batch = self.rollout_buffer.get_batch()
-        state = batch['states']
-        old_action_prob = batch['actions']
-        reward = batch['rewards']
-        next_state = batch['next_states']
-        done = batch['dones']
-        rtg = batch['rtg']
-        timestep = batch['timestep']
-        action = batch['great_action']
-
-        check_nan(state)
-        check_nan(old_action_prob)
-        check_nan(reward)
-        check_nan(rtg)
-        check_nan(timestep)
-        
-
-        _, action_preds, return_preds, value = self.dt.forward(
-            state,
-            old_action_prob,
-            None,
-            rtg,
-            timestep
-        )
-        s_, _, _1, next_value = self.dt.forward(
-            next_state,
-            action_preds,
-            None,
-            rtg,
-            timestep
-        )
-        check_nan(next_value)
-        check_nan(value)
-        adventages = rtg + self.gamma * (1-done) * next_value - value
-        
-        ratio = (action_preds - old_action_prob).mean()
-        surr1 = ratio * adventages
-        surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
-        actor_loss = -torch.min(surr1, surr2).mean()
-        critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
-        entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-        loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        return loss.item()
-    
-    def update_(self):
         l = []
-        batch_size = 2
         for _ in range(self.epoch):
-            batch = self.rollout_buffer.get_batchs(batch_size)
-            state = batch['states'].reshape((batch_size, 1, self.state_dim))
-            old_action_prob = batch['actions'].reshape((batch_size, 1, self.action_dim))
-            reward = batch['rewards'].reshape((batch_size, 1, 1))
-            next_state = batch['next_states'].reshape((batch_size, 1, self.state_dim))
-            done = batch['dones'].reshape((batch_size, 1)).int()
-            rtg = batch['rtg'].reshape((batch_size, 1, 1))
-            timestep = batch['timestep'].reshape((batch_size, 1))
-            action = batch['great_action'].reshape((batch_size, 1))
-    
+            batch = self.rollout_buffer.get_batch()
+            state = batch['states']
+            old_action_prob = batch['actions']
+            reward = batch['rewards']
+            next_state = batch['next_states']
+            done = batch['dones']
+            rtg = batch['rtg']
+            timestep = batch['timestep']
+            action = batch['great_action']
+
             _, action_preds, return_preds, value = self.dt.forward(
                 state,
                 old_action_prob,
@@ -109,14 +58,15 @@ class DT_PPO:
                 rtg,
                 timestep
             )
-            adventages = reward + self.gamma * (1-done) * next_value - value
+            adventages = rtg + self.gamma * (1-done) * next_value - value
+            
             ratio = (action_preds - old_action_prob).mean()
             surr1 = ratio * adventages
             surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
             actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.mse_loss(value, reward + self.gamma * (1-done) * next_value.detach())
+            critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
             entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-            loss = actor_loss + 0.01 * entropy + 0.5 * critic_loss  
+            loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -124,6 +74,7 @@ class DT_PPO:
             l.append(loss.item())
 
         return np.mean(l)
+    
     
     def save(self, path):
         torch.save(self.dt, f'{path}/model.pt')
@@ -190,7 +141,7 @@ class DT_PPO:
 
         return r, l, r_, r__
 
-
+"""
 
 import gym
 
@@ -199,32 +150,33 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e3)
+LEN_EP = int(5e4)
 
 env.close()
 
-if __name__ == '__main__':
 
-    agent = DT_PPO.load('bin')#DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3)
-    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-4)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3, epoch=1, gamma=0.9)
+agent.epoch = 1
+r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-2)
 
-    L = len(r)
+L = len(r)
 
-    fig, axs = plt.subplots(4)
-    axs[0].plot(range(L), r)
-    axs[0].set_title('Absolute reward')
-    axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
-    axs[1].plot(range(L), l, 'tab:orange')
-    axs[1].set_title('Loss evolution')
-    axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
-    axs[2].plot(range(L), r_, 'tab:green')
-    axs[2].set_title('Av reward')
-    axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
-    axs[3].set_title('Av reward cut 5')
-    axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
-    axs[3].plot(range(L), r__, 'tab:red')
+fig, axs = plt.subplots(4)
+axs[0].plot(range(L), r)
+axs[0].set_title('Absolute reward')
+axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[1].plot(range(L), l, 'tab:orange')
+axs[1].set_title('Loss evolution')
+axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
+axs[2].plot(range(L), r_, 'tab:green')
+axs[2].set_title('Av reward')
+axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[3].set_title('Av reward cut 5')
+axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
+axs[3].plot(range(L), r__, 'tab:red')
 
 
-    plt.show()
+plt.show()
 
-    #agent.save('bin')
+#agent.save('bin')
+"""
