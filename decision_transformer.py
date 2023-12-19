@@ -409,7 +409,6 @@ class DecisionTransformer(TrajectoryModel):
 # ! We had to add the rollout buffer method
 
 '''
-
 import gym
 
 LEN_EP = 400

@@ -32,48 +32,45 @@ class DT_PPO:
         return action_dist
     
     def update(self):
-        l = []
-        for _ in range(self.epoch):
-            batch = self.rollout_buffer.get_batch()
-            state = batch['states']
-            old_action_prob = batch['actions']
-            reward = batch['rewards']
-            next_state = batch['next_states']
-            done = batch['dones']
-            rtg = batch['rtg']
-            timestep = batch['timestep']
-            action = batch['great_action']
+        batch = self.rollout_buffer.get_batch()
+        state = batch['states']
+        old_action_prob = batch['actions']
+        reward = batch['rewards']
+        next_state = batch['next_states']
+        done = batch['dones']
+        rtg = batch['rtg']
+        timestep = batch['timestep']
+        action = batch['great_action']
 
-            _, action_preds, return_preds, value = self.dt.forward(
+        _, action_preds, return_preds, value = self.dt.forward(
                 state,
                 old_action_prob,
                 None,
                 rtg,
                 timestep
             )
-            s_, _, _1, next_value = self.dt.forward(
+        s_, _, _1, next_value = self.dt.forward(
                 next_state,
                 action_preds,
                 None,
                 rtg,
                 timestep
             )
-            adventages = rtg + self.gamma * (1-done) * next_value - value
-            
-            ratio = (action_preds - old_action_prob).mean()
-            surr1 = ratio * adventages
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * adventages
-            actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
-            entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-            loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy
+        advantages = rtg + self.gamma * (1-done) * next_value - value
+        ratio = (action_preds - old_action_prob).mean()
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * advantages
+        actor_loss = -torch.min(surr1, surr2).mean()
+        critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
+        entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
+        loss = actor_loss + 0.5 * entropy + 0.6 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy            
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            l.append(loss.item())
+        torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.5)
 
-        return np.mean(l)
+        return loss.item()
     
     
     def save(self, path):
@@ -128,7 +125,7 @@ class DT_PPO:
                 rewards.append(reward.squeeze(2)[0][-1].item())
                 i += 1
                 if i % (timesteps // 10) == 0: 
-                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r[5:])}, loss : {loss}')
+                    print(f'timestep : {i}, reward_mean_sum : {np.mean(r[-2:])}, loss : {loss}')
                 f.update(1)
                 if done:
                     env.reset()
@@ -136,28 +133,27 @@ class DT_PPO:
                 
             r.append(np.sum(rewards))
             r_.append(np.mean(r))
-            r__.append(np.mean(r[5:]))
+            r__.append(np.mean(r[-5:]))
             l.append(np.mean(losses))
 
         return r, l, r_, r__
 
-"""
 
+'''
 import gym
 
-ENV = 'LunarLander-v2'
+ENV = 'CartPole-v1'
 env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(5e4)
+LEN_EP = int(1e4)
 
 env.close()
 
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=48, clip=0.3, epoch=1, gamma=0.9)
-agent.epoch = 1
-r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-2)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=24, clip=0.3, epoch=1, gamma=0.9)
+r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-1)
 
 L = len(r)
 
@@ -179,4 +175,4 @@ axs[3].plot(range(L), r__, 'tab:red')
 plt.show()
 
 #agent.save('bin')
-"""
+'''
