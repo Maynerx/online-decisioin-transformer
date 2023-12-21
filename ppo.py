@@ -10,7 +10,7 @@ def check_nan(tensor):
 
 
 class DT_PPO:
-    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10):
+    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000):
         self.dt = DecisionTransformer(state_dim, action_dim, hidden_size)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.gamma = gamma
@@ -19,7 +19,7 @@ class DT_PPO:
         self.lr = lr
         self.epoch = epoch
         self.eps_clip = clip
-        self.rollout_buffer = RolloutBuffer(buffer_size=50000, state_dim=state_dim, action_dim=action_dim)
+        self.rollout_buffer = RolloutBuffer(buffer_size=buffer_size, state_dim=state_dim, action_dim=action_dim)
     
     def get_action(self, state, action,rtg, timestep):
         action_dist = self.dt.get_action(
@@ -138,8 +138,8 @@ class DT_PPO:
 
         return r, l, r_, r__
 
-
 '''
+
 import gym
 
 ENV = 'CartPole-v1'
@@ -147,12 +147,12 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e4)
+LEN_EP = int(1e5)
 
 env.close()
 
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=24, clip=0.3, epoch=1, gamma=0.9)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=24, clip=0.3, epoch=1, gamma=0.9, buffer_size=500_000)
 r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-1)
 
 L = len(r)
