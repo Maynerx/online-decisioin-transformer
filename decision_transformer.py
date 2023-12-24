@@ -170,6 +170,7 @@ class DecisionTransformer(TrajectoryModel):
         # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
         x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
 
+        
         # get predictions
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
         state_preds = self.predict_state(x[:,2])    # predict next state given state and action
@@ -180,13 +181,13 @@ class DecisionTransformer(TrajectoryModel):
     
 
 
-    def get_action(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
+    def get_action(self, states, actions, rewards, returns_to_go, timesteps, num_env = 1 ,**kwargs):
         # we don't care about the past rewards in this model
 
-        states = states.reshape(1, -1, self.state_dim)
-        actions = actions.reshape(1, -1, self.act_dim)
-        returns_to_go = returns_to_go.reshape(1, -1, 1)
-        timesteps = timesteps.reshape(1, -1)
+        states = states.reshape(num_env, -1, self.state_dim)
+        actions = actions.reshape(num_env, -1, self.act_dim)
+        returns_to_go = returns_to_go.reshape(num_env, -1, 1)
+        timesteps = timesteps.reshape(num_env, -1)
 
         if self.max_length is not None:
             states = states[:,-self.max_length:]
