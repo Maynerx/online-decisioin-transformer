@@ -88,6 +88,8 @@ class DecisionTransformer(TrajectoryModel):
             batch_size = 64,
             mem_capacity = 4096,
             max_length=None,
+            nhead = 12,
+            nlayer = 12,
             max_ep_len=4096,
             action_tanh=True,
             **kwargs
@@ -98,6 +100,8 @@ class DecisionTransformer(TrajectoryModel):
         config = transformers.GPT2Config(
             vocab_size=1,  # doesn't matter -- we don't use the vocab
             n_embd=hidden_size,
+            n_head=nhead,
+            n_layer=nlayer,
             **kwargs
         )
         self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)

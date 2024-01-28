@@ -13,7 +13,7 @@ def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
 
 class DT_PPO:
     def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000):
-        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size)
+        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=3, nhead=3)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.gamma = gamma
         self.state_dim = state_dim
@@ -151,12 +151,12 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(0.5e4)
+LEN_EP = int(3e4)
 
 env.close()
 
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=12, clip=0.2, epoch=10, gamma=0.99, buffer_size=500_000, lr=3e-3)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=3, clip=0.2, epoch=10, gamma=0.99, buffer_size=500_000, lr=3e-3)
 r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-3)
 
 L = len(r)
@@ -176,7 +176,9 @@ axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
 axs[3].plot(range(L), r__, 'tab:red')
 
 
-plt.show()
+#plt.show()
+
+plt.savefig('output.png')
 
 #agent.save('bin')
 
