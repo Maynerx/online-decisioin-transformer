@@ -4,6 +4,8 @@ import random
 import numpy as np
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 
+SEED = 2026
+
 
 MAX_EPISODE_LEN = 1000
 
@@ -124,7 +126,7 @@ class Env:
             torch.tensor(0),
             torch.tensor(self.env.action_space.n),
         ]
-        f_states, info = self.env.reset()
+        f_states, info = self.env.reset(seed=SEED)
         self.states, self.action, self.rewards, self.timesteps, self.rtg = self._init_output(f_states)
         self._init_return()
 
@@ -168,7 +170,7 @@ class Env:
         return self.states, self.action, self.rewards, self.rtg, self.timesteps, done, action
         
     def _reset_env(self):
-        f_states, info = self.env.reset()
+        f_states, info = self.env.reset(seed=SEED)
         self.states, self.action, self.rewards, self.timesteps, self.rtg = self._init_output(f_states)
         return f_states
     

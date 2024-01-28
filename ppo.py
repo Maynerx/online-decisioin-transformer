@@ -1,13 +1,15 @@
 from decision_transformer import *
 import json
 #torch.autograd.set_detect_anomaly(True)
-
+torch.manual_seed(2023)
 
 def check_nan(tensor):
     if torch.isnan(tensor).any():
         raise ValueError(f'NaN values encountered')
 
-
+def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
+    if (step / max_step) < 0.8:
+        return s.step()
 
 class DT_PPO:
     def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000):
@@ -32,43 +34,44 @@ class DT_PPO:
         return action_dist
     
     def update(self):
-        batch = self.rollout_buffer.get_batch()
-        state = batch['states']
-        old_action_prob = batch['actions']
-        reward = batch['rewards']
-        next_state = batch['next_states']
-        done = batch['dones']
-        rtg = batch['rtg']
-        timestep = batch['timestep']
-        action = batch['great_action']
+        for _ in range(self.epoch):
+            batch = self.rollout_buffer.get_batch()
+            state = batch['states']
+            old_action_prob = batch['actions']
+            reward = batch['rewards']
+            next_state = batch['next_states']
+            done = batch['dones']
+            rtg = batch['rtg']
+            timestep = batch['timestep']
+            action = batch['great_action']
 
-        _, action_preds, return_preds, value = self.dt.forward(
-                state,
-                old_action_prob,
-                None,
-                rtg,
-                timestep
-            )
-        s_, _, _1, next_value = self.dt.forward(
-                next_state,
-                action_preds,
-                None,
-                rtg,
-                timestep
-            )
-        advantages = rtg + self.gamma * (1-done) * next_value - value
-        ratio = (action_preds - old_action_prob).mean()
-        surr1 = ratio * advantages
-        surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * advantages
-        actor_loss = -torch.min(surr1, surr2).mean()
-        critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
-        entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-        loss = actor_loss + 0.5 * entropy + 0.6 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy            
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            _, action_preds, return_preds, value = self.dt.forward(
+                    state,
+                    old_action_prob,
+                    None,
+                    rtg,
+                    timestep
+                )
+            s_, _, _1, next_value = self.dt.forward(
+                    next_state,
+                    action_preds,
+                    None,
+                    rtg,
+                    timestep
+                )
+            advantages = rtg + self.gamma * (1-done) * next_value - value
+            ratio = (action_preds - old_action_prob).mean()
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * advantages
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
+            entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
+            loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy            
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-        torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.5)
+            torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.2)
 
         return loss.item()
     
@@ -100,6 +103,7 @@ class DT_PPO:
         return ppo
     
     def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
+        self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=timesteps//10, gamma=0.1)
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
         i = 0
         r, l, r_, r__ = [], [], [], []
@@ -121,6 +125,7 @@ class DT_PPO:
                 state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
                 self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep, great_action)
                 loss = self.update()
+                #schedule(self.schedule, i, timesteps)
                 losses.append(loss)
                 rewards.append(reward.squeeze(2)[0][-1].item())
                 i += 1
@@ -138,7 +143,6 @@ class DT_PPO:
 
         return r, l, r_, r__
 
-'''
 
 import gym
 
@@ -147,13 +151,13 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e5)
+LEN_EP = int(0.5e4)
 
 env.close()
 
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=24, clip=0.3, epoch=1, gamma=0.9, buffer_size=500_000)
-r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-1)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=12, clip=0.2, epoch=10, gamma=0.99, buffer_size=500_000, lr=3e-3)
+r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-3)
 
 L = len(r)
 
@@ -175,4 +179,5 @@ axs[3].plot(range(L), r__, 'tab:red')
 plt.show()
 
 #agent.save('bin')
-'''
+
+from stable_baselines3.ppo import PPO
