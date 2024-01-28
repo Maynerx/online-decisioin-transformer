@@ -83,6 +83,8 @@ class DecisionTransformer(TrajectoryModel):
             loss_fn = 'mse',
             loss_method = 'basic',
             lr = 1e-3,
+            nlayer = 12,
+            nhead = 12,
             scheduler_step = 100,
             scheduler_gamma = 0.1,
             batch_size = 64,
@@ -98,6 +100,8 @@ class DecisionTransformer(TrajectoryModel):
         config = transformers.GPT2Config(
             vocab_size=1,  # doesn't matter -- we don't use the vocab
             n_embd=hidden_size,
+            n_layer=nlayer,
+            n_head=nhead,
             **kwargs
         )
         self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)

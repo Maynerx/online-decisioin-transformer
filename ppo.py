@@ -11,7 +11,7 @@ def check_nan(tensor):
 
 class DT_PPO:
     def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10):
-        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size)
+        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nhead=6, nlayer=6)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.gamma = gamma
         self.state_dim = state_dim
@@ -36,67 +36,68 @@ class DT_PPO:
         return x.tensor_split(x.size(0))
     
     def update(self):
-        batch = self.rollout_buffer.get_batch()
-        state_ = batch['states']
-        old_action_prob_ = batch['actions']
-        reward_ = batch['rewards']
-        next_state_ = batch['next_states']
-        done_ = batch['dones']
-        rtg_ = batch['rtg']
-        timestep_ = batch['timestep']
-        action_ = batch['great_action']
+        for _ in range(self.epoch):
+            batch = self.rollout_buffer.get_batch()
+            state_ = batch['states']
+            old_action_prob_ = batch['actions']
+            reward_ = batch['rewards']
+            next_state_ = batch['next_states']
+            done_ = batch['dones']
+            rtg_ = batch['rtg']
+            timestep_ = batch['timestep']
+            action_ = batch['great_action']
 
-        loss_ = []
+            loss_ = []
 
-        for state, next_state, old_action_prob, rtg, timestep, done in zip(
-            self.split(state_),
-            self.split(next_state_),
-            self.split(old_action_prob_), 
-            self.split(rtg_), 
-            self.split(timestep_), 
-            done_
-            ):
-            
-            _, action_preds, return_preds, value = self.dt.forward(
-                state,
-                old_action_prob,
-                None,
-                rtg,
-                timestep
-            )
-            s_, _, _1, next_value = self.dt.forward(
-                next_state,
-                action_preds,
-                None,
-                rtg,
-                timestep
-            )
+            for state, next_state, old_action_prob, rtg, timestep, done in zip(
+                self.split(state_),
+                self.split(next_state_),
+                self.split(old_action_prob_), 
+                self.split(rtg_), 
+                self.split(timestep_), 
+                done_
+                ):
+                
+                _, action_preds, return_preds, value = self.dt.forward(
+                    state,
+                    old_action_prob,
+                    None,
+                    rtg,
+                    timestep
+                )
+                s_, _, _1, next_value = self.dt.forward(
+                    next_state,
+                    action_preds,
+                    None,
+                    rtg,
+                    timestep
+                )
 
 
-            check_nan(next_value)
-            check_nan(value)
-            adventages = rtg + self.gamma * (1-done) * next_value - value
+                check_nan(next_value)
+                check_nan(value)
+                adventages = rtg + self.gamma * (1-done) * next_value - value
 
-            ratio = (action_preds - old_action_prob).mean()
-            surr1 = ratio * adventages
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * adventages
-            actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
-            entropy = -torch.mean(-action_preds)
+                ratio = (action_preds - old_action_prob).mean()
+                surr1 = ratio * adventages
+                surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * adventages
+                actor_loss = -torch.min(surr1, surr2).mean()
+                critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
+                entropy = -torch.mean(-action_preds)
 
-            # Modify the loss calculation for multiple environments
-            actor_loss = actor_loss.mean()
-            critic_loss = critic_loss.mean()
+                # Modify the loss calculation for multiple environments
+                actor_loss = actor_loss.mean()
+                critic_loss = critic_loss.mean()
 
-            loss = actor_loss + 0.5 * entropy + 0.6 * critic_loss
+                loss = actor_loss + 0.01 * entropy + 0.5 * critic_loss
 
-            self.optimizer.zero_grad()
-            loss.backward(retain_graph=True)
-            self.optimizer.step()
+                self.optimizer.zero_grad()
+                loss.backward(retain_graph=True)
+                self.optimizer.step()
 
-            loss_.append(loss.item())
+                loss_.append(loss.item())
 
-            torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.5)
+                torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.5)
         return np.mean(loss_)
 
     def save(self, path):
@@ -177,14 +178,14 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(1e3)
+LEN_EP = int(5e3)
 
 env.close()
 
 if __name__ == '__main__':
 
-    agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=24, clip=0.3, gamma=0.9)
-    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-1, num_env=3)
+    agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=6, clip=0.2, gamma=0.99, epoch=4)
+    r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-2, num_env=10)
 
     L = len(r)
 
