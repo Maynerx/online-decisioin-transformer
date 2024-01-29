@@ -102,7 +102,7 @@ class DT_PPO:
         ppo.dt = dt
         return ppo
     
-    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 1000):
+    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 200):
         self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=timesteps//10, gamma=0.1)
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
         i = 0
@@ -151,7 +151,7 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(3e4)
+LEN_EP = int(3.5e4)
 
 env.close()
 
@@ -161,24 +161,44 @@ r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-3)
 
 L = len(r)
 
-fig, axs = plt.subplots(4)
-axs[0].plot(range(L), r)
-axs[0].set_title('Absolute reward')
-axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[1].plot(range(L), l, 'tab:orange')
-axs[1].set_title('Loss evolution')
-axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
-axs[2].plot(range(L), r_, 'tab:green')
-axs[2].set_title('Av reward')
-axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[3].set_title('Av reward cut 5')
-axs[3].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[3].plot(range(L), r__, 'tab:red')
+fig, axs = plt.subplots(2, 2, figsize=(12, 10))
 
+# Absolute reward
+axs[0, 0].plot(range(L), r, label='Absolute reward', color='blue')
+axs[0, 0].set_title('Absolute Reward')
+axs[0, 0].set(xlabel='Number of Episodes', ylabel='Reward')
+axs[0, 0].grid(True)
+axs[0, 0].legend()
 
-#plt.show()
+# Loss evolution
+axs[0, 1].plot(range(L), l, label='Loss Evolution', color='orange')
+axs[0, 1].set_title('Loss Evolution')
+axs[0, 1].set(xlabel='Number of Episodes', ylabel='Loss')
+axs[0, 1].grid(True)
+axs[0, 1].legend()
 
-plt.savefig('output.png')
+# Average reward
+axs[1, 0].plot(range(L), r_, label='Average Reward', color='green')
+axs[1, 0].set_title('Average Reward')
+axs[1, 0].set(xlabel='Number of Episodes', ylabel='Reward')
+axs[1, 0].grid(True)
+axs[1, 0].legend()
 
-#agent.save('bin')
+# Average reward (cut 5)
+axs[1, 1].plot(range(L), r__, label='Average Reward Cut 5', color='red')
+axs[1, 1].set_title('Average Reward Cut 5')
+axs[1, 1].set(xlabel='Number of Episodes', ylabel='Reward')
+axs[1, 1].grid(True)
+axs[1, 1].legend()
+
+# Common title
+plt.suptitle('Agent Learning Performance', fontsize=16)
+
+# Adjust layout for better spacing
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+# Show the plot
+plt.show()
+
+#agent.save('bin') 
 
