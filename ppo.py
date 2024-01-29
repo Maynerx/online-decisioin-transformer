@@ -151,7 +151,7 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(3.5e4)
+LEN_EP = int(3e4)
 
 env.close()
 
