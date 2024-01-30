@@ -143,7 +143,7 @@ class DT_PPO:
 
         return r, l, r_, r__
 
-
+"""
 import gym
 
 ENV = 'CartPole-v1'
@@ -202,3 +202,4 @@ plt.show()
 
 #agent.save('bin') 
 
+"""
