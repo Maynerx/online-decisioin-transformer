@@ -4,7 +4,7 @@ import random
 import numpy as np
 
 
-SEED = 2026
+SEED = 0#2026
 
 
 MAX_EPISODE_LEN = 1000

@@ -1,7 +1,7 @@
 from decision_transformer import *
 import json
 #torch.autograd.set_detect_anomaly(True)
-torch.manual_seed(2023)
+#torch.manual_seed(2023)
 
 def check_nan(tensor):
     if torch.isnan(tensor).any():
