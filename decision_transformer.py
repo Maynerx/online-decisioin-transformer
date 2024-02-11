@@ -90,7 +90,7 @@ class DecisionTransformer(TrajectoryModel):
             max_length=None,
             nhead = 12,
             nlayer = 12,
-            n_embd=768
+            n_embd=768,
             max_ep_len=4096,
             action_tanh=True,
             **kwargs
