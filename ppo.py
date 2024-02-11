@@ -13,7 +13,7 @@ def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
 
 class DT_PPO:
     def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000, nlayer = 3, nhead = 3, nembd = 768):
-        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
+        self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead, n_embd = nembd)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.gamma = gamma
         self.state_dim = state_dim
