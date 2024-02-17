@@ -3,6 +3,10 @@ import torch
 import random
 import numpy as np
 
+
+SEED = 2026
+
+
 MAX_EPISODE_LEN = 1000
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

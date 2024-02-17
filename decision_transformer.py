@@ -88,6 +88,8 @@ class DecisionTransformer(TrajectoryModel):
             batch_size = 64,
             mem_capacity = 4096,
             max_length=None,
+            nhead = 12,
+            nlayer = 12,
             max_ep_len=4096,
             action_tanh=True,
             **kwargs
