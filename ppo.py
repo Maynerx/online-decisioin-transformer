@@ -12,13 +12,15 @@ def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
         return s.step()
 
 class DT_PPO:
-    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000, nlayer = 3, nhead = 3):
+    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000, nlayer = 3, nhead = 3, max_norm = 0.2, normalize = True):
         self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
+        self.max_norm = max_norm
         self.gamma = gamma
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.lr = lr
+        self.normalize = normalize
         self.epoch = epoch
         self.eps_clip = clip
         self.rollout_buffer = RolloutBuffer(buffer_size=buffer_size, state_dim=state_dim, action_dim=action_dim)
@@ -44,6 +46,7 @@ class DT_PPO:
             rtg = batch['rtg']
             timestep = batch['timestep']
             action = batch['great_action']
+            rtg = (rtg - rtg.mean()) / (rtg.std() + 1e-7) if self.normalize else rtg
 
             _, action_preds, return_preds, value = self.dt.forward(
                     state,
@@ -71,7 +74,7 @@ class DT_PPO:
             loss.backward()
             self.optimizer.step()
 
-            torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=0.2)
+            torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=self.max_norm)
 
         return loss.item()
     
