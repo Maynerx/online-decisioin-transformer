@@ -74,7 +74,7 @@ class DT_PPO:
             loss.backward()
             self.optimizer.step()
 
-            torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=self.max_norm)
+            #torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=self.max_norm)
 
         return loss.item()
     
