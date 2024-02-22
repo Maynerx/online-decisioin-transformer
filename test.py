@@ -2,15 +2,15 @@ from ppo import *
 from datetime import datetime
 
 
-def train(env, path, max_training_timesteps = 200_000, render = False, gamma = 0.99, lr_actor = 0.0003, lr_critic = 0.001, notebook = False):
+def train(env, path, max_training_timesteps = 200_000, render = False, gamma = 0.99, lr_actor = 0.0003, lr_critic = 0.001, notebook = False, K_epoch = 80, hidden_size = 10):
     print("============================================================================================")
     env_name = env
     max_ep_len = 1000 
     print_freq = max_ep_len * 10
     update_timestep = max_ep_len * 4 
-    K_epochs = 80
+    K_epochs = K_epoch
     eps_clip = 0.2
-    hidden_size = 10
+    hidden_size = hidden_size
     print("training environment name : " + env_name)
     rewards = []
     losses = []
