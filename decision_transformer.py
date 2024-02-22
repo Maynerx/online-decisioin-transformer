@@ -11,8 +11,9 @@ import matplotlib.pyplot as plt
 import tqdm
 from tqdm import tqdm_notebook
 import torch.nn.functional as F
-from rollout_buffer import RolloutBuffer
+from rollout_buffer import RolloutBuffer, Buffer
 from PPO_loss import classic_ppo
+from torch.distributions import Categorical
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -51,23 +52,24 @@ def basic(state ,action, pred_action, rtg, loss_fn):
     loss = loss_fn(pred_action, action)
     return loss
 
-def ppo(state, action, pred_action, rtg, loss_fn):
-    clip = 0.3
-    adventages = rtg - state
-    ratio = torch.exp(pred_action, action)
-    surr1 = adventages * ratio
-    surr2 = torch.clamp(ratio, 1-clip, 1+clip) * adventages
-    loss = -torch.min(surr1, surr1) + 0.5 * loss_fn(state, rtg)
-    return loss
+class Critic(nn.Module):
+    def __init__(self, state_dim):
+        super().__init__()
+        self.critic = self.critic = nn.Sequential(
+            nn.Linear(state_dim, 32),
+            nn.Tanh(),
+            nn.Linear(32, 32),
+            nn.Tanh(),
+            nn.Linear(32, 1)
+        )
+    
+    def forward(self, x):
+        return self.critic(x)
+    
 
-METHOD = {
-    'basic' : basic,
-    'PPO' : ppo
-}
 
-loss_fn_list = {
-    'mse' : mean_square_loss
-}
+
+
 
 class DecisionTransformer(TrajectoryModel):
 
@@ -80,17 +82,11 @@ class DecisionTransformer(TrajectoryModel):
             state_dim,
             act_dim,
             hidden_size,
-            loss_fn = 'mse',
-            loss_method = 'basic',
-            lr = 1e-3,
-            scheduler_step = 100,
-            scheduler_gamma = 0.1,
             batch_size = 64,
-            mem_capacity = 4096,
             max_length=None,
             nhead = 12,
             nlayer = 12,
-            max_ep_len=4096,
+            max_ep_len=64,
             action_tanh=True,
             **kwargs
     ):
@@ -102,11 +98,10 @@ class DecisionTransformer(TrajectoryModel):
             n_embd=hidden_size,
             n_head=nhead,
             n_layer=nlayer,
+            activation_function='tanh',
+            n_inner=hidden_size,
             **kwargs
         )
-        self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)
-        self.rollout_buffer  = RolloutBuffer(buffer_size=mem_capacity, state_dim=state_dim, action_dim=act_dim)
-        self.batch_size = batch_size
 
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
@@ -124,14 +119,8 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_action = nn.Sequential(
             *([nn.Linear(hidden_size, self.act_dim)] + ([nn.Tanh()] if action_tanh else []))
         ).to(DEVICE)
-        self.critic = nn.Linear(hidden_size, 1).to(DEVICE)
+        #self.critic = nn.Linear(hidden_size, 1).to(DEVICE)
         self.predict_return = torch.nn.Linear(hidden_size, 1).to(DEVICE)
-
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=scheduler_step, gamma=scheduler_gamma)
-        self.loss_fn = loss_fn_list[loss_fn]
-        self.loss_method = loss_method#METHOD[loss_method]
-        self.lr = lr
 
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
         batch_size, seq_length = states.shape[0], states.shape[1]
@@ -178,9 +167,13 @@ class DecisionTransformer(TrajectoryModel):
         return_preds = self.predict_return(x[:,2])  # predict next return given state and action
         state_preds = self.predict_state(x[:,2])    # predict next state given state and action
         action_preds = self.predict_action(x[:,1])  # predict next action given state
-        value = self.critic(x[:,1])
+        action_preds = F.softmax(action_preds, dim=-1)
+        dist = Categorical(action_preds)
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+        dist_entropy = dist.entropy()
 
-        return state_preds, action_preds, return_preds, value
+        return state_preds, action_preds, return_preds, action_logprob, action.detach(), dist_entropy
     
 
 
@@ -218,228 +211,30 @@ class DecisionTransformer(TrajectoryModel):
         else:
             attention_mask = None
 
-        _, action_preds, return_preds, value = self.forward(
+        _, action_preds, return_preds, action_logprob, action, dist_entropy = self.forward(
             states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
-
-        return action_preds[0,-1]
-    
-    def ppo(self, state, action, pred_action, rtg):
-        advantage = rtg - pred_action
-        epsilon = 0.3
-        value_coeff=0.5 
-        entropy_coeff=0.01
-        rtg = rtg[0, -1]
-        # PPO clip loss
-        ratio = torch.exp(pred_action - action)
-        clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
-        ppo_loss = -torch.mean(torch.min(ratio * advantage, clipped_ratio * advantage))
-        # Value loss
-        value_loss = F.mse_loss(pred_action, rtg)
-        # Entropy bonus
-        entropy_bonus = -torch.mean(pred_action * torch.exp(pred_action))
-        # Total loss
-        total_loss = ppo_loss + value_coeff * value_loss + entropy_coeff * entropy_bonus
-
-        return total_loss
-    
-    def ppo_loss(self, state, action, pred_action, rtg, clip_ratio=0.2, value_coef=0.5, entropy_coef=0.01):
-        #print(action.size(), (torch.log_softmax(action, dim=0)))
-        advantage = rtg - pred_action.detach()
-        # Calculate surrogate loss
-        ratio = torch.exp(torch.log_softmax(action, dim=0) - torch.log_softmax(pred_action, dim=0))
-        surr1 = ratio * advantage
-        surr2 = torch.clamp(ratio, 1.0 - clip_ratio, 1.0 + clip_ratio) * advantage
-        policy_loss = -torch.min(surr1, surr2).mean()
-        # Calculate value loss
-        value_loss = F.mse_loss(pred_action, action)
-        # Calculate entropy loss
-        entropy = -torch.sum(F.softmax(action, dim=1) * torch.log_softmax(pred_action, dim=1), dim=1).mean()
-        # Final loss
-        loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
-        return loss
-    
-    def basic(self, state, action, pred_action, rtg):
-        loss = self.loss_fn(pred_action, action)
-        return loss
-    
-    
-    def backward(self):
-        batch = self.buffer.sample()
-        losses = []
-        for traj in batch:
-            states, actions, rewards, dones, rtg, timesteps = traj
-            action_target = actions.clone()
-            _, action_preds, return_preds = self.forward(
-                states,
-                actions,
-                None,
-                rtg,
-                timesteps
-            )
-            #action_preds = action_preds[0,-1]
-            self.optimizer.zero_grad()
-            loss = self.ppo(states, action_target, action_preds, rtg)
-            loss.backward()
-            losses.append(loss.item())
-            self.optimizer.step()
-            
-        return np.mean(losses)
+        return action, action_logprob, action_preds
     
 
-    def Backward(self, update_rate = 1):
-        losses = []
-        for i in range(update_rate):
-            rollout_batch = self.rollout_buffer.get_batch()
-            states = rollout_batch['states']
-            action = rollout_batch['actions']
-            next_states = rollout_batch['next_states']
-            rtg = rollout_batch['rtg']
-            timesteps = rollout_batch['timestep']
-            reward = rollout_batch['rewards']
-            action_target = action.clone()
-            _, action_preds, return_preds = self.forward(
-                next_states,
-                action_target,
-                None,
-                rtg,
-                timesteps
-            )
-            self.optimizer.zero_grad()
-            loss = self.ppo_loss(states, action_target, action_preds, rtg)#classic_ppo(states, action_target, action_preds, rtg, next_states, reward)
-            losses.append(loss.item())
-            loss.backward()
-            self.optimizer.step()
-        return np.mean(losses)
+
+class ActorCritic(nn.Module):
+    def __init__(self, state_dim, act_dim, hidden_size, nhead, nlayer):
+        super().__init__()
+        self.actor = DecisionTransformer(state_dim, act_dim, hidden_size, nlayer=nlayer, nhead=nhead).to(DEVICE)
+        self.critic = Critic(state_dim).to(DEVICE)
+
+    def evaluate(self, state, action, returns_to_go, timesteps, old_action_pred):
+        state_preds, action_preds, return_preds, _, ___, __ = self.actor.forward(state, old_action_pred, None, returns_to_go, timesteps)
+        dist = Categorical(action)
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_value = self.critic(state)
+        return action_logprobs, dist_entropy, state_value
     
-    def _init_sc(self, val):
-        def constant(_):
-            return val
-        return constant
+    def select_actions(self, state, action, returns_to_go, timesteps):
+        state_preds, action_preds, return_preds, action_logprob, action, dist_entropy = self.actor.forward(state, action, None, returns_to_go, timesteps)
+        state_value = self.critic(state)
+        return action.detach(), action_logprob.detach(), state_value.detach(), action_preds.detach()
     
-    def _init_model(self):
-        self.lr_scheduler = self._init_sc(self.lr)
+   
     
-    def _update_schedule(self, ep, max_ep):
-        c = 1.0 - float(ep) / float(max_ep)
-        self.scheduler.step()
-    
-    def get_lr(self):
-        for param_group in self.optimizer.param_groups:
-            return param_group["lr"]
-        
-    def Learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
-        self._init_model()
-        env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
-        i = 0
-        r, l, r_ = [], [], []
-        losses = []
-        f = tqdm.tqdm if not notebook else tqdm_notebook
-        for episode in f(range(max_epsiode)):
-            state, action, rtg, timestep = env.reset()
-            rewards = []
-            state_std, state_mean = state.std(), state.mean()
-            #print(self.optimizer.param_groups)
-            for _ in range(max_ep_len):
-                old_state = state.clone()
-                action_dist = self.get_action(
-                states=(state - state_std) / state_mean,
-                actions=action,
-                rewards=None,
-                returns_to_go=rtg,
-                timesteps=timestep
-                )
-                state, action, reward, rtg, timestep, done = env.step(action_dist, _)
-                self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep)
-                loss = self.Backward()
-                self._update_schedule(episode, max_epsiode)
-                losses.append(loss)
-                rewards.append(reward.squeeze(2)[0][-1].item())
-                i += 1
-                if done:
-                    env.reset()
-                    break
-            if episode % (max_epsiode // 10) == 0: 
-                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, lr : {self.get_lr()}')
-            if self.buffer._is_full():
-                pass
-                #self.scheduler.step()
-            r.append(np.sum(rewards))
-            r_.append(np.mean(r))
-            l.append(np.mean(losses))
-        return r, l, r_
-    
-    
-    def learn(self, env_id, max_epsiode, max_ep_len, update_rate = 50, notebook = False, reward_scale = 1e-2, reward_method = 'basic'):
-        env = Env(env_id, reward_scale=reward_scale, reward_method=reward_method)
-        i = 0
-        r, l, r_ = [], [], []
-        losses = []
-        f = tqdm.tqdm if not notebook else tqdm_notebook
-        for episode in f(range(max_epsiode)):
-            state, action, rtg, timestep = env.reset()
-            rewards = []
-            for _ in range(max_ep_len):
-                action_dist = self.get_action(
-                states=state,
-                actions=action,
-                rewards=None,
-                returns_to_go=rtg,
-                timesteps=timestep
-                )
-                state, action, reward, rtg, timestep, done = env.step(action_dist, _)
-                if self.buffer._is_full() and i % update_rate == 0:
-                    loss = self.backward()
-                    losses.append(loss)
-                self.buffer.push(state, action, reward, done, rtg, timestep)
-                rewards.append(reward.squeeze(2)[0][-1].item())
-                i += 1
-                if done:
-                    env.reset()
-                    break
-            if episode % (max_epsiode // 10) == 0: 
-                print(f'episode : {episode}, reward_mean_sum : {np.mean(r)}, loss : {np.mean(losses)}, mem_capacity : {self.buffer.__len__()}')
-            if self.buffer._is_full():
-                pass
-                #self.scheduler.step()
-            r.append(np.sum(rewards))
-            r_.append(np.mean(r))
-            l.append(np.mean(losses))
-        return r, l, r_
-                
-
-# TODO : Create a new Backward method to implement the rollout buffer and then Add a third PPO method. We might need to create another Learn function with the R buffer
-
-                
-# ! We had to add the rollout buffer method
-
-'''
-import gym
-
-LEN_EP = 400
-ENV = 'CartPole-v0'
-env = gym.make(ENV)
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.n
-
-env.close()
-
-model = DecisionTransformer(state_dim, action_dim, 12, lr=1e-5, batch_size=1, mem_capacity=4096)
-r, l, r_ = model.Learn(ENV, max_epsiode=LEN_EP, max_ep_len=200, reward_scale = 1e-4, reward_method=BASIC_METHOD)
-
-
-
-
-fig, axs = plt.subplots(3)
-axs[0].plot(range(LEN_EP), r)
-axs[0].set_title('Absolute reward')
-axs[0].set(xlabel = 'num_episodes', ylabel = 'reward')
-axs[1].plot(range(LEN_EP), l, 'tab:orange')
-axs[1].set_title('Loss evolution')
-axs[1].set(xlabel = 'num_episodes', ylabel = 'loss')
-axs[2].plot(range(LEN_EP), r_, 'tab:green')
-axs[2].set_title('Av reward')
-axs[2].set(xlabel = 'num_episodes', ylabel = 'reward')
-
-
-plt.show()
-'''

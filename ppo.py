@@ -14,6 +14,8 @@ def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
 class DT_PPO:
     def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 50000, nlayer = 3, nhead = 3, max_norm = 0.2, normalize = True):
         self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
+        self.dt2 = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
+        self.dt2.load_state_dict(self.dt.state_dict())
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.max_norm = max_norm
         self.gamma = gamma
@@ -23,89 +25,24 @@ class DT_PPO:
         self.normalize = normalize
         self.epoch = epoch
         self.eps_clip = clip
-        self.rollout_buffer = RolloutBuffer(buffer_size=buffer_size, state_dim=state_dim, action_dim=action_dim)
+        self.rollout_buffer = Buffer()#RolloutBuffer(buffer_size=buffer_size, state_dim=state_dim, action_dim=action_dim)
     
     def get_action(self, state, action,rtg, timestep):
-        action_dist = self.dt.get_action(
+        action, action_logprob, action_preds, value = self.dt.get_action(
             state, 
             action,
             None,
             rtg,
             timesteps=timestep
             )
-        return action_dist
-    
-    def update(self):
-        for _ in range(self.epoch):
-            batch = self.rollout_buffer.get_batch()
-            state = batch['states']
-            old_action_prob = batch['actions']
-            reward = batch['rewards']
-            next_state = batch['next_states']
-            done = batch['dones']
-            rtg = batch['rtg']
-            timestep = batch['timestep']
-            action = batch['great_action']
-            rtg = (rtg - rtg.mean()) / (rtg.std() + 1e-7) if self.normalize else rtg
+        return action, action_logprob, action_preds, value
 
-            _, action_preds, return_preds, value = self.dt.forward(
-                    state,
-                    old_action_prob,
-                    None,
-                    rtg,
-                    timestep
-                )
-            s_, _, _1, next_value = self.dt.forward(
-                    next_state,
-                    action_preds,
-                    None,
-                    rtg,
-                    timestep
-                )
-            advantages = rtg + self.gamma * (1-done) * next_value - value
-            ratio = (action_preds - old_action_prob).mean()
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1+ self.eps_clip) * advantages
-            actor_loss = -torch.min(surr1, surr2).mean()
-            critic_loss = F.mse_loss(value, rtg + self.gamma * (1-done) * next_value.detach())
-            entropy = -torch.mean(-action_preds)#-torch.sum(action_preds * (action_preds + 1e-8), dim=1).mean()
-            loss = actor_loss + 0.01 * entropy + 0.5 *  critic_loss#actor_loss + 0.5 * critic_loss - 0.01 * entropy            
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-            #torch.nn.utils.clip_grad_norm_(self.dt.parameters(), max_norm=self.max_norm)
-
-        return loss.item()
-    
-    
-    def save(self, path):
-        torch.save(self.dt, f'{path}/model.pt')
-        with open(f'{path}/param.json', 'w+') as f:
-            d = {
-                'lr' : self.lr,
-                'gamma' : self.gamma,
-                'state_dim' : self.state_dim,
-                'action_dim' : self.action_dim,
-                'eps_clip' : self.eps_clip
-            }
-            json.dump(d, f)
         
-
-    def load(path):
-        dt = torch.load(f'{path}/model.pt')
-        with open(f'{path}/param.json', 'r+') as f:
-            param = json.load(f)
-        lr = param['lr']
-        gamma = param['gamma']
-        state_dim = param['state_dim']
-        action_dim = param['action_dim']
-        eps_clip = param['eps_clip']
-        ppo = DT_PPO(state_dim, action_dim, 12, lr, gamma, eps_clip)
-        ppo.dt = dt
-        return ppo
+    def update(self):
+        pass
     
-    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 200):
+    
+    def Learn_(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 200):
         self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=timesteps//10, gamma=0.1)
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
         i = 0
@@ -119,14 +56,14 @@ class DT_PPO:
             #print(self.optimizer.param_groups)
             for _ in range(max_timestep):
                 old_state = state.clone()
-                action_dist = self.get_action(
+                action, action_log_prob, action_pred, old_value = self.get_action(
                 state=state,
                 action=action,
                 rtg=rtg,
                 timestep=timestep
                 )
-                state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
-                self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep, great_action)
+                state, action, reward, rtg, timestep, done, great_action = env.step_(action, _)
+                self.rollout_buffer.add_experience_(state, action_pred, reward, state, done, rtg, timestep, great_action, action_log_prob, old_value)
                 loss = self.update()
                 #schedule(self.schedule, i, timesteps)
                 losses.append(loss)
@@ -145,8 +82,105 @@ class DT_PPO:
             l.append(np.mean(losses))
 
         return r, l, r_, r__
+    
+ 
+class PPO:
+    def __init__(self, state_dim, action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, hidden_size = 64, nlayer = 1, nhead = 1):
+        self.gamma = gamma
+        self.eps_clip = eps_clip
+        self.K_epochs = K_epochs
+        self.buffer = Buffer()
+        self.policy = ActorCritic(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
+        self.optimizer = torch.optim.Adam([
+            {'params' : self.policy.actor.parameters(), 'lr' : lr_actor},
+            {'params' : self.policy.critic.parameters(), 'lr' : lr_critic}           
+        ])
+        self.policy_old = ActorCritic(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
+        self.policy_old.load_state_dict(self.policy.state_dict())
+        self.criterion = nn.MSELoss()
 
-"""
+    def select_action(self, state, action, returns_to_go, timesteps):
+        with torch.no_grad():
+            state = torch.tensor(state).float()
+            action, action_logprob, state_val, action_pred = self.policy.select_actions(state, action, returns_to_go, timesteps)
+        self.buffer.states.append(state)
+        self.buffer.actions.append(action)
+        self.buffer.logprobs.append(action_logprob)
+        self.buffer.state_values.append(state_val)
+        self.buffer.action_pred.append(action_pred)
+        return action.item()
+    
+    def update(self):
+        # Monte Carlo estimate of returns
+        losses = []
+        rewards = []
+        discounted_reward = 0
+        for reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
+            if is_terminal:
+                discounted_reward = 0
+            discounted_reward = reward + (self.gamma * discounted_reward)
+            rewards.insert(0, discounted_reward)
+            
+        # Normalizing the rewards
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(DEVICE)
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+
+        # convert list to tensor
+        old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(DEVICE)
+        old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach().to(DEVICE)
+        old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach().to(DEVICE)
+        old_state_values = torch.squeeze(torch.stack(self.buffer.state_values, dim=0)).detach().to(DEVICE)
+        old_rtg = torch.squeeze(torch.stack(self.buffer.rtg, dim=0)).detach().to(DEVICE)
+        old_timesteps = torch.squeeze(torch.stack(self.buffer.timesteps, dim=0)).detach().to(DEVICE)
+        old_actions_preds = torch.squeeze(torch.stack(self.buffer.action_pred, dim=0)).detach().to(DEVICE)
+
+
+        old_states = old_states.reshape((self.buffer.__len__(), 1, old_states.size(1)))
+        old_rtg = old_rtg.reshape((self.buffer.__len__(), 1, 1))
+        old_timesteps = old_timesteps.reshape((self.buffer.__len__(), 1))
+        old_actions_preds = old_actions_preds.reshape((self.buffer.__len__(), 1, old_actions_preds.size(1)))
+
+        # calculate advantages
+        advantages = rewards.detach() - old_state_values.detach()
+
+        # Optimize policy for K epochs
+        for _ in range(self.K_epochs):
+            # Evaluating old actions and values
+            logprobs, dist_entropy, state_values = self.policy.evaluate(old_states, old_actions, old_rtg, old_timesteps, old_actions_preds)
+
+            # match state_values tensor dimensions with rewards tensor
+            state_values = torch.squeeze(state_values)
+            
+            # Finding the ratio (pi_theta / pi_theta__old)
+            ratios = torch.exp(logprobs - old_logprobs.detach())
+
+            # Finding Surrogate Loss  
+            surr1 = ratios * advantages
+            surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
+
+            # final loss of clipped objective PPO
+            loss = -torch.min(surr1, surr2) + 0.5 * self.criterion(state_values, rewards) - 0.01 * dist_entropy
+            
+            # take gradient step
+            self.optimizer.zero_grad()
+            loss.mean().backward()
+            losses.append(loss.mean().item())
+            self.optimizer.step()
+            
+        # Copy new weights into old policy
+        self.policy_old.load_state_dict(self.policy.state_dict())
+
+        # clear buffer
+        self.buffer.clear()
+        return np.mean(losses)
+
+
+def n_p(model):
+    return sum(p.numel() for p in model.policy.parameters()) / 1e3
+
+#print(n_p(PPO(1, 1, 1e-1, 1e-1, 0.99, 80, 0.2, hidden_size=10, nlayer=1, nhead=1)))
+
+'''
 import gym
 
 ENV = 'CartPole-v1'
@@ -154,13 +188,13 @@ env = gym.make(ENV)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-LEN_EP = int(3e4)
+LEN_EP = int(1.5e4)
 
 env.close()
 
 
-agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=3, clip=0.2, epoch=10, gamma=0.99, buffer_size=500_000, lr=3e-3)
-r, l, r_, r__ = agent.Learn(LEN_EP, ENV, notebook=False,reward_scale=1e-3)
+agent = DT_PPO(state_dim=state_dim, action_dim=action_dim, hidden_size=64, clip=0.2, epoch=10, gamma=0.99, buffer_size=100_000, lr=3e-4, nhead = 1, nlayer = 1, normalize = True, max_norm = 1)
+r, l, r_, r__ = agent.Learn_(LEN_EP, ENV, notebook=False ,reward_scale=-0.5, max_timestep=5000)
 
 L = len(r)
 
@@ -202,7 +236,4 @@ plt.tight_layout(rect=[0, 0, 1, 0.96])
 
 # Show the plot
 plt.show()
-
-#agent.save('bin') 
-
-"""
+'''
