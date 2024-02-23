@@ -90,7 +90,7 @@ class DecisionTransformer(TrajectoryModel):
             max_length=None,
             nhead = 12,
             nlayer = 12,
-            max_ep_len=4096,
+            max_ep_len=64,
             action_tanh=True,
             **kwargs
     ):
@@ -102,6 +102,9 @@ class DecisionTransformer(TrajectoryModel):
             n_embd=hidden_size,
             n_head=nhead,
             n_layer=nlayer,
+            activation_function='tanh',
+            n_positions=256,
+            n_inner=8,
             **kwargs
         )
         self.buffer = Custom_Buffer(mem_capacity=mem_capacity, batch_size=batch_size)

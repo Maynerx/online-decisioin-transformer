@@ -144,7 +144,7 @@ class Env:
         self.states = torch.cat([self.states, states], dim=1)
         self.rewards[:, - 1] = torch.tensor(rewards).to(device=device).reshape(self.num_envs, 1)
         self.action[:, -1] = action
-        pred_return = self.reward_method(self.rtg[:, -1], rewards, self.rewards_scale, self.rewards)
+        pred_return = self.reward[:, -1]#self.reward_method(self.rtg[:, -1], rewards, self.rewards_scale, self.rewards)
         self.rtg = torch.cat(
             [self.rtg, pred_return.reshape(self.num_envs, -1, 1)], dim=1
         )
