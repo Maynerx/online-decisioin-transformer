@@ -226,7 +226,7 @@ class DecisionTransformer(TrajectoryModel):
 
         return action_preds[0,-1]
     
-    def get_value(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
+    def get_value(self, states, actions, returns_to_go, timesteps, **kwargs):
         states = states.reshape(1, -1, self.state_dim)
         actions = actions.reshape(1, -1, self.act_dim)
         returns_to_go = returns_to_go.reshape(1, -1, 1)
