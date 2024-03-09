@@ -12,7 +12,7 @@ def schedule(s : torch.optim.lr_scheduler.StepLR, step, max_step):
         return s.step()
 
 class DT_PPO:
-    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10, buffer_size = 2048, nlayer = 3, nhead = 3, max_norm = 0.2, normalize = True):
+    def __init__(self, state_dim, action_dim, hidden_size, lr = 3e-4, gamma = 0.99, clip = 0.2, epoch = 10,  max_timestep = 2048, nlayer = 3, nhead = 3, max_norm = 0.2, normalize = True):
         self.dt = DecisionTransformer(state_dim, action_dim, hidden_size, nlayer=nlayer, nhead=nhead)
         self.optimizer = torch.optim.Adam(self.dt.parameters(), lr=lr)
         self.max_norm = max_norm
@@ -23,7 +23,8 @@ class DT_PPO:
         self.normalize = normalize
         self.epoch = epoch
         self.eps_clip = clip
-        self.rollout_buffer = RolloutBuffer(buffer_size=buffer_size, state_dim=state_dim, action_dim=action_dim)
+        self.max_timestep = max_timestep
+        self.rollout_buffer = RolloutBuffer(buffer_size=max_timestep, state_dim=state_dim, action_dim=action_dim)
     
     def get_action(self, state, action,rtg, timestep):
         action_dist = self.dt.get_action(
@@ -105,7 +106,7 @@ class DT_PPO:
         ppo.dt = dt
         return ppo
     
-    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4, max_timestep = 2048):
+    def Learn(self, timesteps, env, notebook = False, reward_scale = 1e-4):
         self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=timesteps//10, gamma=0.1)
         env = Env(env, reward_scale=reward_scale, reward_method=BASIC_METHOD)
         i = 0
@@ -118,7 +119,7 @@ class DT_PPO:
             rewards = []
             state_std, state_mean = state.std(), state.mean()
             #print(self.optimizer.param_groups)
-            for _ in range(max_timestep):
+            for _ in range(self.max_timestep):
                 old_state = state.clone()
                 action_dist = self.get_action(
                 state=state,
@@ -127,7 +128,7 @@ class DT_PPO:
                 timestep=timestep
                 )
                 state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
-                g_reward = reward.detach()
+                rewards.append(reward.squeeze(2)[0][-1].item())
                 
                 terminal_value = self.dt.get_value(
                 states=state,
@@ -140,7 +141,7 @@ class DT_PPO:
                 loss = self.update()
                 #schedule(self.schedule, i, timesteps)
                 losses.append(loss)
-                rewards.append(g_reward.squeeze(2)[0][-1].item())
+                
                 i += 1
                 if i % (timesteps // 10) == 0: 
                     print(f'timestep : {i}, reward_mean_sum : {np.mean(r[-2:])}, loss : {loss}')
