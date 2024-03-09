@@ -127,6 +127,7 @@ class DT_PPO:
                 timestep=timestep
                 )
                 state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
+                g_reward = reward.detach()
                 
                 terminal_value = self.dt.get_value(
                 states=state,
@@ -139,7 +140,7 @@ class DT_PPO:
                 loss = self.update()
                 #schedule(self.schedule, i, timesteps)
                 losses.append(loss)
-                rewards.append(reward.squeeze(2)[0][-1].item())
+                rewards.append(g_reward.squeeze(2)[0][-1].item())
                 i += 1
                 if i % (timesteps // 10) == 0: 
                     print(f'timestep : {i}, reward_mean_sum : {np.mean(r[-2:])}, loss : {loss}')
