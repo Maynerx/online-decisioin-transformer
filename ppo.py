@@ -129,10 +129,10 @@ class DT_PPO:
                 state, action, reward, rtg, timestep, done, great_action = env.step_(action_dist, _)
                 
                 terminal_value = self.dt.get_value(
-                state=state,
-                action=action,
-                rtg=rtg,
-                timestep=timestep
+                states=state,
+                actions=action,
+                returns_to_go=rtg,
+                timesteps=timestep
                 )
                 reward += self.gamma * terminal_value
                 self.rollout_buffer.add_experience(old_state, action, reward, state, done, rtg, timestep, great_action)
