@@ -24,6 +24,18 @@ class RolloutBuffer:
         self.index = 0
         self.full = False
 
+    def reset(self):
+        self.states = [0]*self.buffer_size
+        self.actions = [0]*self.buffer_size
+        self.rewards = [0]*self.buffer_size
+        self.next_states = [0]*self.buffer_size
+        self.dones = [0]*self.buffer_size
+        self.rtg = [0]*self.buffer_size
+        self.timestep = [0]*self.buffer_size
+        self.great_action = [0]*self.buffer_size
+        self.index = 0
+        self.full = False
+
     def add_experience(self, state, action, reward, next_state, done, rtg, timestep, great_action):
         self.states[self.index] = state
         self.actions[self.index] = action

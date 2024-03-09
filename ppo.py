@@ -137,6 +137,7 @@ class DT_PPO:
                 f.update(1)
                 if done:
                     env.reset()
+                    self.rollout_buffer.reset()
                     break
                 
             r.append(np.sum(rewards))
