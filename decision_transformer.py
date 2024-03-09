@@ -226,6 +226,19 @@ class DecisionTransformer(TrajectoryModel):
 
         return action_preds[0,-1]
     
+    def get_value(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
+        states = states.reshape(1, -1, self.state_dim)
+        actions = actions.reshape(1, -1, self.act_dim)
+        returns_to_go = returns_to_go.reshape(1, -1, 1)
+        timesteps = timesteps.reshape(1, -1)
+        attention_mask = None
+        _, action_preds, return_preds, value = self.forward(
+            states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
+        return value
+
+
+
+    
     def ppo(self, state, action, pred_action, rtg):
         advantage = rtg - pred_action
         epsilon = 0.3
