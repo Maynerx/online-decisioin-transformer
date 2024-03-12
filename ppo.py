@@ -141,6 +141,12 @@ class DT_PPO:
                 loss = self.update()
                 #schedule(self.schedule, i, timesteps)
                 losses.append(loss)
+
+                if done:
+                    r.append(np.sum(rewards))
+                    r_.append(np.mean(r))
+                    r__.append(np.mean(r[-5:]))
+                    l.append(np.mean(losses))
                 
                 i += 1
                 if i % (timesteps // 10) == 0: 
@@ -148,10 +154,7 @@ class DT_PPO:
                 f.update(1)
 
                 
-            r.append(np.sum(rewards))
-            r_.append(np.mean(r))
-            r__.append(np.mean(r[-5:]))
-            l.append(np.mean(losses))
+            
 
         return r, l, r_, r__
 
